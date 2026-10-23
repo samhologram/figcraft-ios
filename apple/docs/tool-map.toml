@@ -1,0 +1,52 @@
+# Desktop tools (engine ToolId) and panels -> where the iOS app has them.
+# Checked by scripts/tool-coverage.sh: every desktop tool.<id> and panel.<id> needs an entry with `ios` or `excluded`.
+
+[tool.move]
+ios = "Tool bar > Move group (iPad floating toolbar, iPhone tool strip); one-finger drag selects and moves"
+[tool.scale]
+ios = "Tool bar > Move group flyout (long press); one-finger drag scales"
+[tool.hand]
+ios = "Tool bar > Move group flyout; one-finger drag pans (two fingers always pan)"
+[tool.frame]
+ios = "Tool bar > Frame group"
+[tool.section]
+ios = "Tool bar > Frame group flyout"
+[tool.slice]
+ios = "Tool bar > Frame group flyout"
+[tool.rectangle]
+ios = "Tool bar > Shape group"
+[tool.line]
+ios = "Tool bar > Shape group flyout"
+[tool.arrow]
+ios = "Tool bar > Shape group flyout"
+[tool.ellipse]
+ios = "Tool bar > Shape group flyout"
+[tool.polygon]
+ios = "Tool bar > Shape group flyout"
+[tool.star]
+ios = "Tool bar > Shape group flyout"
+[tool.pen]
+ios = "Tool bar > Pen group; Apple Pencil or finger places points"
+[tool.pencil]
+ios = "Tool bar > Pen group flyout; Apple Pencil draws with pressure"
+[tool.shapeBuilder]
+ios = "Tool bar > Pen group flyout"
+[tool.text]
+ios = "Tool bar > Text; the software keyboard edits the text layer"
+[tool.comment]
+ios = "Tool bar > Comment"
+[tool.eyedropper]
+ios = "Color picker eyedropper button and the Edit > Pick color command (palette); no single-key shortcut on touch"
+
+[panel.layers]
+ios = "Left sidebar > Layers (iPad), Layers sheet (iPhone)"
+[panel.pages]
+ios = "Left sidebar > Pages section above the layer list (iPad), Layers sheet header (iPhone)"
+[panel.assets]
+ios = "Left sidebar > Assets (iPad), Assets sheet (iPhone)"
+[panel.design]
+ios = "Inspector > Design tab (iPad trailing column), Design sheet (iPhone)"
+[panel.prototype]
+ios = "Inspector > Prototype tab (iPad trailing column), Prototype sheet (iPhone); Play button in the top bar"
+[panel.inspect]
+ios = "Inspector > Inspect tab (iPad trailing column), Inspect sheet (iPhone)"

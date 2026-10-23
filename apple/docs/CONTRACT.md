@@ -295,7 +295,12 @@ toast with the kind (never a crash).
 `section.flows`), `control.<propKey>` (inspector fields, key = node.set prop key, e.g. `control.x`, `control.opacity`),
 `layer.<id>`, `page.<id>`, `canvas`, `present`, `present.back`, `present.close`, `present.restart`,
 `palette`, `palette.search`, `template.<id>`, `undo`, `redo`, `demoReady` (hidden marker, present once demo seeding
-finished), `toast`. Widget ids must never look like command ids (no `panel.` ids that are also commands → use the
+finished), `toast`. Chrome ids used by the UI and tests: `phone.layers|design|prototype`, `sheet.close`,
+`sidebar`, `sidebar.toggle`, `inspector`, `inspector.toggle`, `toolbar`, `toolstrip`, `palette.open|list|done`,
+`menu.more`, `menu.palette`, `share`, `export.*`, `templates.*`, `error.ok`, `rename.ok`, `layers.*`, `pages.*`,
+`assets.*`, `flow.*`, `interaction.add`, `cmdSheet.*` (command parameter sheet), `inspectCode.*`, `comments`,
+`comments.open`, `versions`, `section.header|grids|properties|code|selectionColors|protoSettings|styles|variables`.
+Widget ids must never look like command ids (no `panel.` ids that are also commands → use the
 LeftPanel/RightPanel raw values above; check-command-ids enforces it).
 
 ## 6. Demo (`-FigCraftDemo`)

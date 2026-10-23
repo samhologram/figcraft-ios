@@ -1,0 +1,14 @@
+# id<TAB>reason. Commands that cannot work in the document-per-scene iOS app. Be conservative: only what truly cannot work.
+window.new	one document per scene on iOS: use the system document browser
+window.focus	no tabbed windows on iOS
+file.new	a document is created by the document browser; the bridge handle owns exactly one document
+file.open	documents are opened by the document browser (DocumentGroup), not through the session
+file.openRecent	the document browser lists recent files
+file.close	the scene closes the document
+file.moveTab	no document tabs on iOS
+file.recover	recovery copies are a desktop crash-recovery feature; iOS autosaves through the document scene
+file.duplicate	opens a second document in the session: use Duplicate in the system document browser
+collab.join	live collaboration needs a network session the iOS app does not offer yet
+collab.publish	live collaboration needs a network session the iOS app does not offer yet
+collab.follow	live collaboration needs a network session the iOS app does not offer yet
+plugin.import	reads a plugin manifest from a file path; no file-system access on iOS
