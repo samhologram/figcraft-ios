@@ -1,11 +1,33 @@
 import Foundation
 import Testing
+import UIKit
 import UniformTypeIdentifiers
 @preconcurrency import FigCraftKit
 @testable import FigCraft
 
 /// DocumentGroup creates and reads ReferenceFileDocument values away from the main actor.
 struct DocumentLifecycleTests {
+    @Test @MainActor func photoCreatesVisibleImageLayerAndNativeFile() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let png = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 3), format: format).pngData { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 3))
+        }
+        let bytes = try await Task.detached {
+            let document = try FigCraftDocument.fromPhoto(png)
+            return try document.snapshot(contentType: .figcraftDocument)
+        }.value
+        #expect(!bytes.isEmpty)
+        let reopened = try DocumentHandle.open(data: bytes, name: "Photo.figcraft")
+        let layer = try #require(reopened.layers().first { $0.kind == "rectangle" })
+        let node = try #require(JSONBridge.decodeObject(try reopened.nodeJson(id: layer.id)))
+        #expect((node["width"] as? NSNumber)?.doubleValue == 2)
+        #expect((node["height"] as? NSNumber)?.doubleValue == 3)
+        let fills = try #require(node["fills"] as? [[String: Any]])
+        #expect(fills.contains { ($0["type"] as? String)?.uppercased() == "IMAGE" })
+    }
+
     @Test func createSnapshotReadSnapshotOffMain() async throws {
         let document = await Task.detached { FigCraftDocument() }.value
         await MainActor.run {

@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import ImageIO
 @preconcurrency import FigCraftKit
 
 extension UTType {
@@ -71,6 +72,37 @@ final class FigCraftDocument: ReferenceFileDocument, @unchecked Sendable {
                           userInfo: [NSLocalizedDescriptionKey: EditorModel.message(of: error)])
         }
         demoReady = demoEnabled && DemoSeeder.isReady(handle)
+        initError = nil
+    }
+
+    /// Prepare a native design from a Photos selection before DocumentGroup creates a file.
+    /// ImageIO handles formats such as HEIC and applies the source orientation; the engine receives PNG.
+    static func fromPhoto(_ data: Data) throws -> FigCraftDocument {
+        guard !data.isEmpty, data.count <= 256 * 1024 * 1024,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0 else { throw PhotoCreationError.invalidImage }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 16_384
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              image.width > 0, image.height > 0 else { throw PhotoCreationError.invalidImage }
+        let png = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil)
+        else { throw PhotoCreationError.invalidImage }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination), png.length > 0, png.length <= 256 * 1024 * 1024
+        else { throw PhotoCreationError.invalidImage }
+        let handle = try DocumentHandle.open(data: png as Data, name: "Photo.png")
+        guard handle.layers().contains(where: { $0.kind == "rectangle" }),
+              !(try handle.saveBytes()).isEmpty else { throw PhotoCreationError.invalidImage }
+        return FigCraftDocument(preparedHandle: handle)
+    }
+
+    private init(preparedHandle: DocumentHandle) {
+        handle = preparedHandle
+        demoReady = false
         initError = nil
     }
 

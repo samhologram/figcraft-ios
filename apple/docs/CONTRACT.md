@@ -401,3 +401,13 @@ Native decoders: images (incl. HEIC/RAW) decode with ImageIO/Core Image and PDFs
 
 Current gaps: only `fileImporter` → `file.import` from the editor; no `PhotosPicker`, no new-document-from-media,
 no drop or paste of images, no image-fill placement into the selected shape.
+
+New from Photo launch flow: offer a prominent `NewDocumentButton` backed by the system Photos picker before any
+document exists. Its asynchronous `prepareDocument` waits for a single selected image; cancellation throws
+`CancellationError` (returning `nil` would create a blank document). ImageIO decodes and orients the selected image,
+then supplies PNG data to the existing `file.open` image path, whose first page contains a full-size image layer.
+Return the prepared `FigCraftDocument` only after that layer and native snapshot validate. The document browser then
+saves the `.figcraft` in its current writable location. Keep `New Design` as the explicit blank creation route.
+The required app-owned iCloud/On My iPad folder and original-source-to-native-copy reuse are not yet guaranteed by
+this route: iOS `NewDocumentButton` has no browser-directory parameter, and FigCraft has no foreign-file copy map.
+Do not register image files as writable DocumentGroup documents or edit an original in place to close that gap.

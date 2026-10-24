@@ -22,13 +22,6 @@ struct PhoneEditorView: View {
             }
             .background { ToolShortcutButtons(model: model) }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { ui.togglePhonePanels() } label: {
-                        Label("Panels", systemImage: "sidebar.trailing")
-                    }
-                    .accessibilityIdentifier("panels.toggle")
-                    .accessibilityValue(ui.phoneSheet == nil ? "Hidden" : "Shown")
-                }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { model.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                         .disabled(!model.state.canUndo)
@@ -42,6 +35,11 @@ struct PhoneEditorView: View {
                         .accessibilityIdentifier("comments.open")
                     Button { model.showExport = true } label: { Label("Share", systemImage: "square.and.arrow.up") }
                         .accessibilityIdentifier("share")
+                    Button { ui.togglePhonePanels() } label: {
+                        Label("Panels", systemImage: "sidebar.trailing")
+                    }
+                    .accessibilityIdentifier("panels.toggle")
+                    .accessibilityValue(ui.phoneSheet == nil ? "Hidden" : "Shown")
                 }
             }
             .sheet(item: $ui.phoneSheet) { sheet in

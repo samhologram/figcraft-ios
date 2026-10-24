@@ -17,6 +17,7 @@ struct FigCraftApp: App {
         }
 
         DocumentGroupLaunchScene("FigCraft") {
+            NewFromPhotoButton()
             NewDocumentButton("New Design")
                 .accessibilityIdentifier("newDocument")
         } background: {
