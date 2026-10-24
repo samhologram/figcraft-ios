@@ -341,3 +341,27 @@ Current non-compliance (to fix when the hold lifts):
 - Canvas-only fullscreen mode (`control.fullscreen`, `control.fullscreen.exit`, ⌃⌘F, Esc) not implemented.
 - Menu bar already merges File/Edit/View/Help into the system groups and adds Object…Tools as custom menus; Window/Help
   ordering not yet verified on device.
+
+## 8. Productive and clean (cookbook §0b, 2026-10-24)
+
+Speed: every frequent action ≤ 1 tap from the canvas; every desktop shortcut on a hardware keyboard with the same keys
+(engine `keymap.rs` KEYS: V, K, H, F/A, ⇧S, S, R, L, ⇧L, O, P, ⇧P, T, C, ⇧M, ⌘G, ⌘⌥K, ⇧A auto layout, ⌘D, ⌘[ ⌘]…);
+⌘K opens the palette; context menus on layers, frames, canvas selection, page/style/variable rows; drag & drop (layer
+reorder/reparent, image/SVG files onto the canvas, rows between panels where the desktop allows it); two-finger tap =
+undo, three-finger tap = redo (two-finger double tap stays zoom-to-fit); Apple Pencil draws with Pen/Pencil, finger
+pans; scrubbable numeric fields; customizable toolbar (`ToolbarCustomization` / `.toolbar(id:)`); remember last tool,
+panel layout, fill/stroke values and zoom per document; multiple windows (scenes) on iPad. Clean: system components,
+SF Symbols, semantic colours, one primary action per area, the rest in menus, panel headers and the palette; no custom
+chrome. The Haiku feature pass reports taps-to-do for the top 10 workflows: draw a frame, add text, rectangle + fill
+colour, auto layout on a selection, create component, insert instance, add a prototype interaction, present, export
+PNG, rename/reorder layers.
+
+Current gaps (fix when the hold lifts):
+- Hardware shortcuts: only single-key tool shortcuts (hidden buttons) and menu-bar items with ⌘ chords; the rest of
+  KEYS (⇧-letter tools, auto layout ⇧A, grouping, arrange, zoom ⇧0/⇧1/⇧2) not mapped; no ⌘K palette shortcut.
+- No two-finger-tap undo / three-finger-tap redo gestures (two-finger double tap = fit exists).
+- No drag & drop: layer rows can't be reordered/reparented by dragging; no file drops onto the canvas.
+- Context menus exist on layer and page rows; missing on the canvas selection and on style/variable rows.
+- Toolbar not customizable; last tool, panel layout and values are not remembered (only prototype present options).
+- Multi-window: `DocumentGroup` allows several scenes, but per-window state (panels, tool) is not separated or kept.
+- Pencil: pressure + finger-pans-while-Pencil exist for Pen/Pencil; no Pencil hover/squeeze/double-tap tool switch.

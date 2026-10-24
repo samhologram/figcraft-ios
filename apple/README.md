@@ -42,6 +42,8 @@ Conventions taken from it:
 
 Panels follow `docs/CONTRACT.md` §7: every desktop panel opens from the trailing panel menu and the Window menu, can be hidden, collapsed and reordered (persisted), with its own actions in its header; on iPhone panels are sheets. A canvas-only fullscreen mode (⌃⌘F, one floating exit button) hides everything but the canvas.
 
+Productivity rules (`docs/CONTRACT.md` §8): frequent actions ≤ 1 tap from the canvas, every desktop shortcut on a hardware keyboard, ⌘K palette, context menus and drag & drop everywhere the desktop has them, two-finger-tap undo / three-finger-tap redo, Pencil, scrubbable fields, customizable toolbar, remembered tool and layout, multi-window — with system components and SF Symbols only.
+
 Per-idiom degradation (iPad windows are resizable): full layout (sidebar + canvas + inspector) → inspector and sidebar
 as overlays/sheets when the window is narrower than 1000 pt → iPhone layout (tool strip + sheets) below 700 pt.
 Nothing falls off screen: tool strips scroll as the last resort, labels never wrap mid-word.
