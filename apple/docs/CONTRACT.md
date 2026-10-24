@@ -312,3 +312,32 @@ on frame 2, `select.set` the first frame, `view.zoomFit`. Then `isDemoReady = tr
 tests launch with `-FigCraftDemo` and create a new document from the document browser (identifier of the system
 "Create Document" button) — the Core also honours `-FigCraftDemoAutoCreate`, which opens a new demo document at launch
 without the browser (used by tests to skip the system browser).
+
+## 7. Panels and menu bar (cookbook §4 rules, 2026-10-24)
+
+Rules: (1) every desktop panel exists and opens from the trailing panel menu (`panels.menu`) and the Window menu;
+panels can be added, hidden, collapsed and stacked/reordered (Figma/Photoshop style), arrangement persisted per device
+(`@AppStorage("figcraft.panels")`, JSON list of `{id, collapsed}` per column); iPhone shows them as sheets. A panel
+entry that opens nothing is a bug; the panel tour opens and acts on every panel. (2) Panel-owned actions sit in the
+panel header, not the global toolbar. (3) iPad menu bar = iPadOS system groups with the desktop menus/items inserted in
+desktop order; Window and Help last.
+
+Panel catalog (id → desktop source → header actions): `layers` (+ Pages; layers.rs → `command.page.add`, collapse all),
+`assets` (assets_panel.rs → create component, search), `styles` (→ create style), `variables` (→ create collection /
+variable), `design` (right.rs), `prototype` (proto_panel.rs → add flow), `inspect` (Dev Mode, right.rs inspect),
+`comments` (→ add comment, filter), `versions` (version history → save version), `libraries` (`panel.libraries`
+request). Window menu: one toggle per panel, identifier `window.panel.<id>`; panel menu items `panels.toggle.<id>`;
+panel headers `panelHeader.<id>`, collapse `panelHeader.<id>.collapse`. `view.layers|assets|design|prototype` UI
+requests/commands show the matching panel.
+
+Current non-compliance (to fix when the hold lifts):
+- Panels are fixed tab strips (leading: Layers/Assets; trailing: Design/Prototype/Inspect): no add/hide/collapse,
+  no stacking or reordering, nothing persisted; no `panels.menu`.
+- Window menu has no panel entries; `view.layers|assets|design|prototype` not verified to open their panel.
+- Comments and Version history are sheets opened from the global top bar / overflow (`comments.open`, `menu.versions`),
+  not panels; their actions should move into their panel headers.
+- Styles and Variables live as sections inside Assets; create actions sit in section rows/+ menus, not a panel header.
+- Libraries panel missing (`panel.libraries` request only toasts).
+- Canvas-only fullscreen mode (`control.fullscreen`, `control.fullscreen.exit`, ⌃⌘F, Esc) not implemented.
+- Menu bar already merges File/Edit/View/Help into the system groups and adds Object…Tools as custom menus; Window/Help
+  ordering not yet verified on device.
