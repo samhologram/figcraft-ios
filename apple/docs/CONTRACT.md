@@ -32,10 +32,13 @@ A FigCraft file is one `.figcraft` file (zip-like bytes from `figcraft_format::s
 - UTTypes imported (open/import): `com.figma.fig` (`fig`, via `file.open` data), `public.svg-image`, `public.png`,
   `public.jpeg` (imports go through `file.import` with base64 `data`).
 - `FigCraftDocument: ReferenceFileDocument` (Snapshot = `Data`):
-  - `init()` (New): `DocumentHandle.newDocument(name: "Untitled", dark: <system scheme>)`. With launch arg
-    `-FigCraftDemo` the *new* document is built by `DemoSeeder` instead (see §6).
-  - `init(configuration:)`: `DocumentHandle.open(data:, name:)` with the file's bytes.
-  - `snapshot(contentType:)`: `handle.saveBytes()` (engine bytes with thumbnail, no disk access).
+  - `init()` (New): create a thread-safe `DocumentHandle` directly with an explicit default page appearance;
+    `DocumentGroup` may call this off the main actor. With `-FigCraftDemo`, the new handle is built and validated
+    by `DemoSeeder`; a failed seed leaves a blank handle with a visible error and never sets `demoReady`.
+  - `init(configuration:)`: `DocumentHandle.open(data:, name:)` with the file's bytes, off the main actor if needed.
+  - `model`: a cached `@MainActor` computed getter builds `EditorModel` only when the scene accesses it. Demo
+    readiness on readback is based on validated seeded content while the demo launch arg is active, never filename.
+  - `snapshot(contentType:)`: `handle.saveBytes()` directly (engine bytes with thumbnail, no disk access or model hop).
   - `fileWrapper(snapshot:configuration:)`: `FileWrapper(regularFileWithContents:)`.
   - Engine history is mirrored on the scene `UndoManager`: after every call whose `historyId` changed (and that was
     not itself an undo/redo), register an undo action that calls `model.undo()` (redo symmetric).
@@ -309,10 +312,10 @@ LeftPanel/RightPanel raw values above; check-command-ids enforces it).
 `DemoSeeder` (Core): new documents in demo mode = `DocumentHandle.fromTemplate(templateId: "mobile-app", dark:)`,
 then through engine commands: `proto.flow.add` on the first top-level frame, `proto.interaction.add` click-navigate
 between the first two frames (`{id: <a button-like layer in frame 1, else frame 1>, dest: frame2}`) and a back action
-on frame 2, `select.set` the first frame, `view.zoomFit`. Then `isDemoReady = true` (shows the `demoReady` marker). UI
-tests launch with `-FigCraftDemo` and create a new document from the document browser (identifier of the system
-"Create Document" button) — the Core also honours `-FigCraftDemoAutoCreate`, which opens a new demo document at launch
-without the browser (used by tests to skip the system browser).
+on frame 2, `select.set` the first frame, `view.zoomFit`. `isDemoReady` becomes true only after validation of the
+actual seeded frames and prototype content, including after DocumentGroup writes and reads an Untitled new file. UI
+tests launch with `-FigCraftDemo` and create a new document from the native DocumentGroup browser. The legacy
+`-FigCraftDemoAutoCreate` argument also enables seeding when a new document is created; it does not bypass the browser.
 
 ## 7. Panels and menu bar (cookbook §4 rules, 2026-10-24)
 

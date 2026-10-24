@@ -4,6 +4,15 @@ import Foundation
 /// Demo content for screenshots and UI tests (`-FigCraftDemo`). New documents become the engine's "Mobile app"
 /// template plus a prototype flow and click-through interactions, all added through engine commands.
 enum DemoSeeder {
+    enum SeedError: LocalizedError {
+        case incomplete(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .incomplete(let reason): "FigCraft demo could not be prepared: \(reason)"
+            }
+        }
+    }
     nonisolated static let launchArgument = "-FigCraftDemo"
     nonisolated static let autoCreateArgument = "-FigCraftDemoAutoCreate"
     nonisolated static let templateID = "mobile-app"
@@ -13,17 +22,30 @@ enum DemoSeeder {
         return args.contains(launchArgument) || args.contains(autoCreateArgument)
     }
 
-    nonisolated static var autoCreate: Bool {
-        ProcessInfo.processInfo.arguments.contains(autoCreateArgument)
+    /// Builds and validates demo content. The caller reports failure instead of marking a blank fallback ready.
+    nonisolated static func makeHandle(dark: Bool) throws -> DocumentHandle {
+        let handle = try DocumentHandle.fromTemplate(templateId: templateID, dark: dark)
+        let failures = seed(handle)
+        if !failures.isEmpty { throw SeedError.incomplete(failures.joined(separator: "; ")) }
+        guard isReady(handle) else { throw SeedError.incomplete("required frames or prototype content are missing") }
+        return handle
     }
 
-    /// Builds the demo document. Falls back to a blank document when the template cannot be built.
-    nonisolated static func makeHandle(dark: Bool) -> DocumentHandle {
-        guard let handle = try? DocumentHandle.fromTemplate(templateId: templateID, dark: dark) else {
-            return DocumentHandle.newDocument(name: "Untitled", dark: dark)
-        }
-        seed(handle)
-        return handle
+    /// Readback from DocumentGroup may be named Untitled; verify the saved fixture itself.
+    nonisolated static func isReady(_ handle: DocumentHandle) -> Bool {
+        let rows = handle.layers()
+        let frames = rows.filter { $0.parent == nil && $0.kind == "frame" }
+        guard frames.count >= 2,
+              frames.contains(where: { $0.name == "Welcome" }),
+              frames.contains(where: { $0.name == "Explore" }),
+              rows.contains(where: { row in
+                  guard let json = try? handle.nodeJson(id: row.id),
+                        let object = JSONBridge.decodeObject(json),
+                        let interactions = object["interactions"] as? [Any] else { return false }
+                  return !interactions.isEmpty
+              }),
+              let presenter = try? handle.presenter(start: frames[0].id) else { return false }
+        return !presenter.state().flows.isEmpty
     }
 
     /// Adds the flow, the click-navigate interaction between the first two top-level frames, a back action on

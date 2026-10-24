@@ -16,40 +16,65 @@ final class FigCraftDocument: ReferenceFileDocument, @unchecked Sendable {
     static var readableContentTypes: [UTType] { [.figcraftDocument, .figmaFig] }
     static var writableContentTypes: [UTType] { [.figcraftDocument] }
 
-    /// The observable editor state of this document (created on the main actor).
-    let model: EditorModel
+    /// UniFFI's handle serializes engine access and can be used by DocumentGroup on a background thread.
+    private let handle: DocumentHandle
+    private let demoReady: Bool
+    private let initError: String?
+    @MainActor private var cachedModel: EditorModel?
+
+    /// The scene asks for the model on the main actor, after DocumentGroup creates or reads the file.
+    @MainActor var model: EditorModel {
+        if let cachedModel { return cachedModel }
+        let made = EditorModel(handle: handle, demoReady: demoReady)
+        made.lastError = initError
+        cachedModel = made
+        return made
+    }
 
     /// New document: blank, or the demo content when launched with `-FigCraftDemo`.
     init() {
-        let model = MainActor.assumeIsolated { () -> EditorModel in
-            let dark = UITraitCollection.current.userInterfaceStyle == .dark
-            if DemoSeeder.isEnabled {
-                return EditorModel(handle: DemoSeeder.makeHandle(dark: dark), demoReady: true)
+        // A document has a stable light page colour; SwiftUI chrome follows the scene appearance.
+        // No UIKit trait or main-actor state is read in this off-main DocumentGroup initializer.
+        if DemoSeeder.isEnabled {
+            do {
+                let seeded = try DemoSeeder.makeHandle(dark: false)
+                handle = seeded
+                demoReady = true
+                initError = nil
+            } catch {
+                NSLog("FigCraftDemo: creation failed: %@", error.localizedDescription)
+                handle = DocumentHandle.newDocument(name: "Untitled", dark: false)
+                demoReady = false
+                initError = error.localizedDescription
             }
-            return EditorModel(handle: DocumentHandle.newDocument(name: "Untitled", dark: dark))
+        } else {
+            handle = DocumentHandle.newDocument(name: "Untitled", dark: false)
+            demoReady = false
+            initError = nil
         }
-        self.model = model
     }
 
-    required init(configuration: ReadConfiguration) throws {
+    required convenience init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let name = configuration.file.filename.map { ($0 as NSString).deletingPathExtension } ?? "Untitled"
-        let handle: DocumentHandle
+        try self.init(data: data, name: name)
+    }
+
+    /// The same read path, exposed to unit tests because SwiftUI does not expose ReadConfiguration's initializer.
+    init(data: Data, name: String, demoEnabled: Bool = DemoSeeder.isEnabled) throws {
         do {
             handle = try DocumentHandle.open(data: data, name: name)
         } catch {
             throw NSError(domain: "ca.hologram.figcraft", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: EditorModel.message(of: error)])
         }
-        // A demo file written by the auto-create path is already seeded.
-        let demo = DemoSeeder.autoCreate && configuration.file.filename?.hasPrefix("FigCraftDemo") == true
-        self.model = MainActor.assumeIsolated { EditorModel(handle: handle, demoReady: demo) }
+        demoReady = demoEnabled && DemoSeeder.isReady(handle)
+        initError = nil
     }
 
     func snapshot(contentType: UTType) throws -> Data {
-        let handle = model.handle
         do {
             return try handle.saveBytes()
         } catch {

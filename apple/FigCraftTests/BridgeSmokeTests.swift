@@ -63,7 +63,7 @@ struct BridgeSmokeTests {
     }
 
     @Test func demoSeederBuildsFlow() throws {
-        let handle = DemoSeeder.makeHandle(dark: false)
+        let handle = try DemoSeeder.makeHandle(dark: false)
         let frames = handle.layers().filter { $0.parent == nil && $0.kind == "frame" }
         #expect(frames.count >= 2)
         let first = try #require(frames.first)
@@ -84,7 +84,7 @@ struct BridgeSmokeTests {
     }
 
     @Test func presenterTapNavigates() throws {
-        let handle = DemoSeeder.makeHandle(dark: false)
+        let handle = try DemoSeeder.makeHandle(dark: false)
         let presenter = try handle.presenter(start: nil)
         let start = presenter.state()
         let spot = try #require(presenter.hotspots().first)
