@@ -39,6 +39,7 @@ A FigCraft file is one `.figcraft` file (zip-like bytes from `figcraft_format::s
   - `fileWrapper(snapshot:configuration:)`: `FileWrapper(regularFileWithContents:)`.
   - Engine history is mirrored on the scene `UndoManager`: after every call whose `historyId` changed (and that was
     not itself an undo/redo), register an undo action that calls `model.undo()` (redo symmetric).
+- App folder: iCloud Drive › FigCraft (ubiquity container `iCloud.ca.hologram.figcraft`, `NSUbiquitousContainers` public), falling back to On My iPad › FigCraft; default location in the launch browser. Opening a foreign format (`.fig`, SVG, images) creates a native `.figcraft` copy there (saved on first edit, original untouched; reopening the same original reopens its copy, keyed by the original's bookmark/hash); Export/Share writes foreign formats out. Gap: not implemented (foreign files currently open as Viewer types in place).
 - One engine `Session` per document (each `DocumentHandle` owns one). Paths are never used for the document; the
   bridge only uses bytes APIs (`load_bytes`, `file_bytes`).
 

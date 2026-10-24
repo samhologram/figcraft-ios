@@ -41,6 +41,13 @@ parallel apps, `main` + `[skip ci]` pushes, upstream sync script, live simulator
   via PhotoKit, Music, Files…): open and edit items in place, keep the engine's catalog as an internal cache keyed by the
   platform's ids, and write results back through the platform's non-destructive editing API with the engine's settings
   as re-editable adjustment data. Never make the user "import" what the platform already holds.
+- Document apps own a folder: "<App>" in iCloud Drive (ubiquity container, document scope public, app icon in Files),
+  falling back to On My iPad › <App> (`UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`) when iCloud is
+  unavailable (free Personal Team, signed out). It is the launch browser's default location; new documents go there.
+- Opening a foreign format (PNG, JPEG, HEIC, PSD, SVG…) creates an editable copy in the native format in that folder,
+  saved as soon as an edit happens (leaving the editor must leave a file); the original is never modified. Reopening
+  the same original reopens its copy (remember source → copy) instead of making "name 2". Export/Share writes
+  foreign formats back out. Library apps (LightCraft) instead write back to the platform library.
 - When the user's wording is ambiguous ("use the internal library"), ask once with concrete options; then re-brief
   every running agent on the decision immediately.
 - Follow Apple's HIG for iPad and iPhone as closely as possible: system components, materials (Liquid Glass),
@@ -214,6 +221,9 @@ parallel apps, `main` + `[skip ci]` pushes, upstream sync script, live simulator
 - One booted simulator on the machine at a time, across parallel app sessions: take the shared lock
   (`mkdir <workspace>/.sim.lock`) before booting, shut down and release after each run; never hold it across a build.
   Builds use `generic/platform=iOS Simulator` and never boot a device. If the Mac lags, `simctl shutdown all`.
+  Take the lock only in the same process that runs the tests (bounded wait loop, release in a trap/finally step);
+  never leave a detached background waiter: an orphaned loop grabs the lock later with no one using it and blocks
+  every other app. A lock older than its run's timeout with no test process alive is stale and may be removed.
 - Parallel apps share one iPad and one iPhone simulator; don't `simctl create` per-app devices. After every run,
   `simctl uninstall` the app and its UITests runner, so no compiled app stays installed when not needed.
 - Close Simulator.app while tests run; drive and inspect with XCUITest and `simctl io screenshot`, not by hand.
