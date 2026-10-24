@@ -5,29 +5,38 @@ struct PanelTabs<Tab: Hashable & CaseIterable & RawRepresentable>: View where Ta
     @Binding var selection: Tab
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(Tab.allCases), id: \.rawValue) { tab in
-                let active = selection == tab
-                Button {
-                    selection = tab
-                } label: {
-                    Text(verbatim: tab.rawValue.prefix(1).uppercased() + tab.rawValue.dropFirst())
-                        .font(.subheadline.weight(active ? .semibold : .regular))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .background {
-                            if active { Capsule().fill(Color.accentColor.opacity(0.18)) }
+        ScrollViewReader { reader in
+            ScrollView(.horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(Array(Tab.allCases), id: \.rawValue) { tab in
+                        let active = selection == tab
+                        Button {
+                            selection = tab
+                        } label: {
+                            Text(verbatim: tab.rawValue.prefix(1).uppercased() + tab.rawValue.dropFirst())
+                                .font(.subheadline.weight(active ? .semibold : .regular))
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background {
+                                    if active { Capsule().fill(Color.accentColor.opacity(0.18)) }
+                                }
+                                .contentShape(Capsule())
                         }
-                        .contentShape(Capsule())
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("panel.\(tab.rawValue)")
+                        .accessibilityAddTraits(active ? .isSelected : [])
+                        .id(tab.rawValue)
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("panel.\(tab.rawValue)")
-                .accessibilityAddTraits(active ? .isSelected : [])
+                .padding(4)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: selection, initial: true) { _, selected in
+                withAnimation(.smooth) { reader.scrollTo(selected.rawValue, anchor: .center) }
             }
         }
-        .padding(4)
         .background(.quaternary.opacity(0.5), in: Capsule())
     }
 }

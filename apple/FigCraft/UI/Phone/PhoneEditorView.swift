@@ -117,7 +117,6 @@ struct PhonePanelSheet: View {
             .frame(maxHeight: .infinity)
         }
         .onAppear {
-            if sheet == .design, model.rightPanel == .prototype { model.rightPanel = .design }
             if sheet == .prototype { model.rightPanel = .prototype }
         }
         .accessibilityElement(children: .contain)

@@ -16,8 +16,25 @@ final class EditorModel {
     var tool: String
     var leftPanel: LeftPanel = .layers
     var rightPanel: RightPanel = .design
+    let panelDock = PanelDockLayout()
+    var panelRequest = 0
+    var lastRequestedPanel: DockPanelID = .layers
     var inspectorVisible = true
     var sidebarVisible = true
+
+    func showPanel(_ panel: DockPanelID) {
+        panelDock.show(panel)
+        lastRequestedPanel = panel
+        panelRequest += 1
+        if panel.isLeading { sidebarVisible = true } else { inspectorVisible = true }
+        switch panel {
+        case .layers: leftPanel = .layers
+        case .assets: leftPanel = .assets
+        case .design: rightPanel = .design
+        case .prototype: rightPanel = .prototype
+        case .inspect: rightPanel = .inspect
+        }
+    }
     var lastError: String?
     var toast: String?
     var isDemoReady = false

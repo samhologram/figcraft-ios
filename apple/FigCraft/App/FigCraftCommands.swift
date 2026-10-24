@@ -123,10 +123,43 @@ private struct CommandButton: View {
     let model: EditorModel?
 
     var body: some View {
-        Button(CommandCatalog.shared.label(id)) { model?.present(id) }
+        Button(CommandCatalog.shared.label(id)) {
+            if let panel = Self.panel(for: id) { model?.showPanel(panel) }
+            else { model?.present(id) }
+        }
             .keyboardShortcut(MenuLayoutBuilder.shortcuts[id])
             .disabled(!(model?.isEnabled(id) ?? false))
             .accessibilityIdentifier("command.\(id)")
+    }
+
+    static func panel(for id: String) -> DockPanelID? {
+        switch id {
+        case "view.layers": .layers
+        case "view.assets": .assets
+        case "view.design": .design
+        case "view.prototype": .prototype
+        default: nil
+        }
+    }
+}
+
+private struct WindowPanelMenu: Commands {
+    var body: some Commands {
+        CommandMenu("Window") {
+            WindowPanelItems()
+        }
+    }
+}
+
+private struct WindowPanelItems: View {
+    @FocusedValue(\.editorModel) private var model
+
+    var body: some View {
+        ForEach(DockPanelID.allCases) { panel in
+            Button("Show \(panel.title)") { model?.showPanel(panel) }
+                .disabled(model == nil)
+                .accessibilityIdentifier("window.panel.\(panel.rawValue)")
+        }
     }
 }
 
@@ -188,5 +221,6 @@ struct FigCraftCommands: Commands {
     var body: some Commands {
         SystemMenus()
         CustomMenus()
+        WindowPanelMenu()
     }
 }

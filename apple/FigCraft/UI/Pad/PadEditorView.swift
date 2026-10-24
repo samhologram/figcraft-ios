@@ -18,18 +18,18 @@ struct PadEditorView: View {
             let isWide = geo.size.width >= 1000
             HStack(spacing: 0) {
                 if isWide && model.sidebarVisible {
-                    SidebarPanel(model: model).frame(width: sidebarWidth)
+                    PanelDockView(model: model, leading: true).frame(width: sidebarWidth)
                     Divider()
                 }
                 canvas
                 if isWide && model.inspectorVisible {
                     Divider()
-                    InspectorPanel(model: model).frame(width: inspectorWidth)
+                    PanelDockView(model: model, leading: false).frame(width: inspectorWidth)
                 }
             }
             .overlay(alignment: .leading) {
                 if !isWide && model.sidebarVisible {
-                    SidebarPanel(model: model)
+                    PanelDockView(model: model, leading: true)
                         .frame(width: min(sidebarWidth, geo.size.width * 0.6))
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
                         .padding(8)
@@ -38,7 +38,7 @@ struct PadEditorView: View {
             }
             .overlay(alignment: .trailing) {
                 if !isWide && model.inspectorVisible {
-                    InspectorPanel(model: model)
+                    PanelDockView(model: model, leading: false)
                         .frame(width: min(inspectorWidth, geo.size.width * 0.6))
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22))
                         .padding(8)
@@ -47,6 +47,11 @@ struct PadEditorView: View {
             }
             .animation(.snappy(duration: 0.25), value: model.sidebarVisible)
             .animation(.snappy(duration: 0.25), value: model.inspectorVisible)
+            .onChange(of: model.panelRequest) { _, _ in
+                guard !isWide else { return }
+                if model.lastRequestedPanel.isLeading { model.inspectorVisible = false }
+                else { model.sidebarVisible = false }
+            }
             .onChange(of: isWide, initial: true) { old, new in
                 wide = new
                 // Entering the narrow layout starts with the canvas alone; opening a panel then overlays it.
@@ -115,50 +120,5 @@ struct PadEditorView: View {
         let opening = !model.inspectorVisible
         model.inspectorVisible = opening
         if opening && !wide { model.sidebarVisible = false }
-    }
-}
-
-/// Layers and Pages / Assets column.
-struct SidebarPanel: View {
-    @Bindable var model: EditorModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            PanelTabs(selection: $model.leftPanel)
-                .padding(10)
-            Group {
-                switch model.leftPanel {
-                case .layers: LayersPanel(model: model)
-                case .assets: AssetsPanel(model: model)
-                }
-            }
-            .frame(maxHeight: .infinity)
-        }
-        .background(.background)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("sidebar")
-    }
-}
-
-/// Design / Prototype / Inspect column.
-struct InspectorPanel: View {
-    @Bindable var model: EditorModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            PanelTabs(selection: $model.rightPanel)
-                .padding(10)
-            Group {
-                switch model.rightPanel {
-                case .design: DesignInspector(model: model)
-                case .prototype: PrototypeInspector(model: model)
-                case .inspect: InspectInspector(model: model)
-                }
-            }
-            .frame(maxHeight: .infinity)
-        }
-        .background(.background)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("inspector")
     }
 }

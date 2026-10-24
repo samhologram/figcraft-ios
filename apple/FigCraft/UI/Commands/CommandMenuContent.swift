@@ -67,6 +67,8 @@ struct CommandMenuButton: View {
             // The version history panel is a sheet here (the engine only raises a UI request for it).
             if id == "file.versionHistory", let ui {
                 ui.showVersions = true
+            } else if let panel = panelForViewCommand(id) {
+                model.showPanel(panel)
             } else {
                 model.present(id)
             }
@@ -75,6 +77,16 @@ struct CommandMenuButton: View {
         }
         .disabled(!model.isEnabled(id))
         .accessibilityIdentifier("command.\(id)")
+    }
+
+    private func panelForViewCommand(_ id: String) -> DockPanelID? {
+        switch id {
+        case "view.layers": .layers
+        case "view.assets": .assets
+        case "view.design": .design
+        case "view.prototype": .prototype
+        default: nil
+        }
     }
 }
 

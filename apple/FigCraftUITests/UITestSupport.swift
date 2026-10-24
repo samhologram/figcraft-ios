@@ -29,6 +29,60 @@ class FigCraftUITestCase: XCTestCase {
         pause(1.5)
     }
 
+    /// A new DocumentGroup file is created in the browser's current writable directory.
+    /// Recents is a collection, so first choose local storage through the native Browse UI.
+    /// Query stable, exact labels instead of enumerating the changing Files browser.
+    @discardableResult
+    func openNewDesignIfNeeded() -> Bool {
+        let browser = prefixQuery("DOC.browsingRoot").firstMatch
+        func foregroundCanvas() -> Bool {
+            let canvas = element("canvas")
+            return !browser.exists && canvas.exists && canvas.isHittable
+        }
+        if element("demoReady").waitForExistence(timeout: 2) && foregroundCanvas() { return true }
+
+        if browser.exists {
+            let browse = app.buttons.matching(NSPredicate(format: "label == %@", "Browse")).firstMatch
+            if browse.exists && browse.isHittable { browse.tap(); pause(0.5) }
+            let localLabel = isPad ? "On My iPad" : "On My iPhone"
+            let location = app.buttons.matching(NSPredicate(format: "label == %@", localLabel)).firstMatch
+            let locationCell = app.cells.matching(NSPredicate(format: "label CONTAINS %@", localLabel)).firstMatch
+            let locationText = app.staticTexts.matching(NSPredicate(format: "label == %@", localLabel)).firstMatch
+            if location.exists && location.isHittable { location.tap(); pause(0.5) }
+            else if locationCell.exists && locationCell.isHittable { locationCell.tap(); pause(0.5) }
+            else if locationText.exists && locationText.isHittable { locationText.tap(); pause(0.5) }
+            else {
+                XCTFail("The native Browse view has no reachable \(localLabel) location")
+                return false
+            }
+            let folder = app.cells.matching(NSPredicate(format: "label == %@", "FigCraft")).firstMatch
+            if folder.exists && folder.isHittable { folder.tap(); pause(0.5) }
+        }
+
+        let labeled = app.buttons.matching(NSPredicate(format: "label == %@", "New Design")).firstMatch
+        let identified = app.buttons.matching(identifier: "newDocument").firstMatch
+        for _ in 0..<10 {
+            if labeled.exists && labeled.isHittable { labeled.tap(); break }
+            if identified.exists && identified.isHittable { identified.tap(); break }
+            pause(0.5)
+        }
+        let alert = app.alerts.firstMatch
+        if alert.exists {
+            let message = ([alert.label] + alert.staticTexts.allElementsBoundByIndex.map(\.label)).joined(separator: " | ")
+            XCTFail("Document creation alert: \(message)")
+            return false
+        }
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            if foregroundCanvas() && element("demoReady").exists { return true }
+            pause(0.5)
+        }
+        let labelState = labeled.exists ? "frame=\(labeled.frame) hittable=\(labeled.isHittable)" : "missing"
+        let idState = identified.exists ? "frame=\(identified.frame) hittable=\(identified.isHittable)" : "missing"
+        XCTFail("New Design did not open a foreground demo canvas (label: \(labelState); id: \(idState); browser=\(browser.exists))")
+        return false
+    }
+
     func element(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }

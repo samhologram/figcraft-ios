@@ -331,10 +331,24 @@ request). Window menu: one toggle per panel, identifier `window.panel.<id>`; pan
 panel headers `panelHeader.<id>`, collapse `panelHeader.<id>.collapse`. `view.layers|assets|design|prototype` UI
 requests/commands show the matching panel.
 
-Current non-compliance (to fix when the hold lifts):
-- Panels are fixed tab strips (leading: Layers/Assets; trailing: Design/Prototype/Inspect): no add/hide/collapse,
-  no stacking or reordering, nothing persisted; no `panels.menu`.
-- Window menu has no panel entries; `view.layers|assets|design|prototype` not verified to open their panel.
+Dock implementation contract (2026-10-24): `PanelDockLayout` in `Core/Panel.swift` owns persistent per-device
+leading/trailing groups of `DockPanelID` tabs. `show(_:)` adds or selects the panel, expands its group, makes its
+column visible, and records the selected panel for the horizontal tab reader and vertical group reader to scroll into
+view. Group controls collapse, move up/down, stack a tab into another group and hide it. `PanelDockView` is the shared
+iPad dock; iPhone keeps panel sheets and selects the requested tab. `panel.<id>` identifies tabs,
+`panels.menu.leading|trailing` selects or adds panels idempotently (`panels.show.<id>`), and
+`panelHeader.<id>.collapse|menu` identifies the group controls. The header row itself is not an accessibility
+element because that masks the child actions. Hide is an explicit group-menu action. Reopening the same selected panel
+increments `EditorModel.panelRequest` to scroll both readers.
+Only a panel whose existing content is mounted may be offered as functional. `Window` menu entries call `show(_:)`.
+The current dock implementation offers Layers, Assets, Design, Prototype and Inspect. Their selected tab is scrolled
+into view on selection on both iPad and iPhone; group selection scrolls the iPad dock vertically. The existing panel
+content remains mounted in the dock, with its existing actions.
+
+Remaining panel work:
+- Existing Layers, Assets, Design, Prototype and Inspect content is mounted in the dock; Styles and Variables still
+  live inside Assets, and Comments and Versions remain sheets until their content and actions are migrated.
+- The Window menu now opens the five mounted panels; device testing still needs to verify the menu order and actions.
 - Comments and Version history are sheets opened from the global top bar / overflow (`comments.open`, `menu.versions`),
   not panels; their actions should move into their panel headers.
 - Styles and Variables live as sections inside Assets; create actions sit in section rows/+ menus, not a panel header.
