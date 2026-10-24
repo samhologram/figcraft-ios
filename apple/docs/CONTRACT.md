@@ -375,6 +375,7 @@ else the current page at the viewport centre (`file.import` with `x`,`y`). Sourc
 Files/iCloud (`fileImporter`), drag & drop onto the canvas, paste (⌘V with image/SVG data). Entry points: new-document
 flow, Layers and Assets panel headers, File ▸ Place image / Import, ⌘K palette, canvas context menu. Ids:
 `media.photos`, `media.files`, `newFromMedia`.
+Native decoders: images (incl. HEIC/RAW) decode with ImageIO/Core Image and PDFs with PDFKit in Swift; the app passes PNG-encoded pixels (or SVG text) to the engine through `file.import`/`file.placeImage` data; engine decoders only for its native formats (`.figcraft`, `.fig`, SVG).
 
 Current gaps: only `fileImporter` → `file.import` from the editor; no `PhotosPicker`, no new-document-from-media,
 no drop or paste of images, no image-fill placement into the selected shape.
