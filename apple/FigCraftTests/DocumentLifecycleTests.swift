@@ -7,8 +7,11 @@ import UniformTypeIdentifiers
 /// DocumentGroup creates and reads ReferenceFileDocument values away from the main actor.
 struct DocumentLifecycleTests {
     @Test func createSnapshotReadSnapshotOffMain() async throws {
+        let document = await Task.detached { FigCraftDocument() }.value
+        await MainActor.run {
+            _ = document.model.run("shape.rectangle", ["x": 10, "y": 20, "width": 100, "height": 50])
+        }
         let bytes = try await Task.detached {
-            let document = FigCraftDocument()
             return try document.snapshot(contentType: .figcraftDocument)
         }.value
         #expect(!bytes.isEmpty)
@@ -21,9 +24,19 @@ struct DocumentLifecycleTests {
         #expect(!reopened.1.isEmpty)
         let original = try DocumentHandle.open(data: bytes, name: "Untitled")
         let copy = try DocumentHandle.open(data: reopened.1, name: "Untitled")
-        #expect(original.layers().count == copy.layers().count)
+        let originalShape = try #require(original.layers().first { $0.kind == "rectangle" })
+        let copyShape = try #require(copy.layers().first { $0.kind == "rectangle" })
+        #expect(copy.layers().count == original.layers().count)
+        #expect(copyShape.id == originalShape.id)
+        #expect(copyShape.name == originalShape.name)
+        let before = try #require(JSONBridge.decodeObject(try original.nodeJson(id: originalShape.id)))
+        let after = try #require(JSONBridge.decodeObject(try copy.nodeJson(id: copyShape.id)))
+        for key in ["x", "y", "width", "height"] {
+            #expect((before[key] as? NSNumber)?.doubleValue == (after[key] as? NSNumber)?.doubleValue)
+        }
+        #expect((after["width"] as? NSNumber)?.doubleValue == 100)
+        #expect((after["height"] as? NSNumber)?.doubleValue == 50)
         await MainActor.run {
-            #expect(reopened.0.model.state.revision == copy.state().revision)
             #expect(!reopened.0.model.isDemoReady)
         }
     }
