@@ -1,5 +1,9 @@
 # FigCraft: user-story UX validation, iPadOS and iOS
 
+## Native media copy checkpoint — 2026-10-24
+
+Luna passed all 14 Swift unit cases on the current native-copy build, including synthetic Photos and Files image copy/read/edit/reimport behavior. The signed build was updated in place and launched on Sam's iPad. This verifies serialization and native copy routing, not the system photo picker, cancel path, document browser navigation, or a personal media selection. Those UI stories remain pending actual assertions.
+
 ## Latest checkpoint — 2026-10-24
 
 Luna's current iPad run passed all 11 Swift unit cases, including off-main document creation/readback with a persisted rectangle and seeded Untitled readiness. The focused dock and opacity/prototype UI cases both stopped in the native DocumentGroup browser before their product assertions: local storage was unreachable after Browse and New Design was not hittable. The next run captures the post-Browse accessibility hierarchy as text. The new iPhone toolbar panel toggle and iPad dock reveal scroll compiled in the generic simulator and signed physical-device builds, but their interactions have not been tested. The latest FigCraft app was installed in place and launched normally on Sam's iPad; this is a launch check only.
