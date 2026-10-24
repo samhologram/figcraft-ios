@@ -44,6 +44,8 @@ Panels follow `docs/CONTRACT.md` §7: every desktop panel opens from the trailin
 
 Productivity rules (`docs/CONTRACT.md` §8): frequent actions ≤ 1 tap from the canvas, every desktop shortcut on a hardware keyboard, ⌘K palette, context menus and drag & drop everywhere the desktop has them, two-finger-tap undo / three-finger-tap redo, Pencil, scrubbable fields, customizable toolbar, remembered tool and layout, multi-window — with system components and SF Symbols only.
 
+Media (`docs/CONTRACT.md` §9): start a file from an image or design file, and place images from Photos, Files/iCloud, drag & drop or paste into the selected frame or the page.
+
 Per-idiom degradation (iPad windows are resizable): full layout (sidebar + canvas + inspector) → inspector and sidebar
 as overlays/sheets when the window is narrower than 1000 pt → iPhone layout (tool strip + sheets) below 700 pt.
 Nothing falls off screen: tool strips scroll as the last resort, labels never wrap mid-word.

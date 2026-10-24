@@ -365,3 +365,16 @@ Current gaps (fix when the hold lifts):
 - Toolbar not customizable; last tool, panel layout and values are not remembered (only prototype present options).
 - Multi-window: `DocumentGroup` allows several scenes, but per-window state (panels, tool) is not separated or kept.
 - Pencil: pressure + finger-pans-while-Pencil exist for Pen/Pencil; no Pencil hover/squeeze/double-tap tool switch.
+
+## 9. Media in and new-from-media (cookbook §0b, 2026-10-24)
+
+Start a new file from an image or design file (`.fig`, `.svg`, `.png`, `.jpg`, `.heic`; new document whose first frame
+is sized to the image, via `file.open` data for design files and `file.new` + `file.import` for images) and
+place/import into the current context: selected frame or shape fill (`file.placeImage` / image fill via `node.set`),
+else the current page at the viewport centre (`file.import` with `x`,`y`). Sources: camera roll (`PhotosPicker`),
+Files/iCloud (`fileImporter`), drag & drop onto the canvas, paste (⌘V with image/SVG data). Entry points: new-document
+flow, Layers and Assets panel headers, File ▸ Place image / Import, ⌘K palette, canvas context menu. Ids:
+`media.photos`, `media.files`, `newFromMedia`.
+
+Current gaps: only `fileImporter` → `file.import` from the editor; no `PhotosPicker`, no new-document-from-media,
+no drop or paste of images, no image-fill placement into the selected shape.
