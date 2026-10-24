@@ -33,6 +33,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ca.hologram.figcraft
+        CODE_SIGN_ENTITLEMENTS: FigCraft/FigCraft.entitlements
         PRODUCT_NAME: FigCraft
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
@@ -54,6 +55,11 @@ targets:
         UILaunchScreen:
           UIImageRespectsSafeAreaInsets: false
         UIFileSharingEnabled: true
+        NSUbiquitousContainers:
+          iCloud.ca.hologram.figcraft:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: FigCraft
+            NSUbiquitousContainerSupportedFolderLevels: Any
         LSSupportsOpeningDocumentsInPlace: true
         UISupportsDocumentBrowser: true
         UIRequiresFullScreen: false
@@ -78,6 +84,10 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [com.figma.fig]
+          - CFBundleTypeName: Raster Image
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.png, public.jpeg, public.heic, public.tiff, com.compuserve.gif, org.webmproject.webp]
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: ca.hologram.figcraft.document
             UTTypeDescription: FigCraft Design

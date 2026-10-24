@@ -408,6 +408,11 @@ document exists. Its asynchronous `prepareDocument` waits for a single selected 
 then supplies PNG data to the existing `file.open` image path, whose first page contains a full-size image layer.
 Return the prepared `FigCraftDocument` only after that layer and native snapshot validate. The document browser then
 saves the `.figcraft` in its current writable location. Keep `New Design` as the explicit blank creation route.
-The required app-owned iCloud/On My iPad folder and original-source-to-native-copy reuse are not yet guaranteed by
-this route: iOS `NewDocumentButton` has no browser-directory parameter, and FigCraft has no foreign-file copy map.
-Do not register image files as writable DocumentGroup documents or edit an original in place to close that gap.
+Editable media copy contract: store a native `.figcraft` copy immediately under FigCraft's public iCloud Documents
+container, falling back to its local Files-visible Documents folder. Identify a Photos import by the original bytes'
+SHA-256, and a Files import by name plus original bytes' SHA-256; reimport opens the existing native copy, including
+its edits. Link the exact prepared native snapshot's SHA-256 to that copy so DocumentGroup's later native read adopts
+the same handle/copy. For a foreign browser file, `fileWrapper` returns its original bytes unchanged while writing
+the current native snapshot to the app-owned copy. Debounce engine edits to that same copy and flush on scene close.
+The browser's current-location alias created by `NewDocumentButton` remains under system control; its destination
+cannot be chosen by the app on iOS. The app-owned native copy is the editable source of truth.

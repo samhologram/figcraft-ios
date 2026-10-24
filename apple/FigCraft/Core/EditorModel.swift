@@ -57,6 +57,7 @@ final class EditorModel {
     var presenter: PresentModel?
 
     @ObservationIgnored weak var undoManager: UndoManager?
+    @ObservationIgnored var onDirty: (@MainActor () -> Void)?
     @ObservationIgnored var lastHistoryId: UInt64
     @ObservationIgnored var lastRevision: UInt64
     @ObservationIgnored var suppressUndoRegistration = false
@@ -154,6 +155,7 @@ final class EditorModel {
         if heavyStale, full || Date().timeIntervalSince(lastHeavy) > 0.12 { reloadHeavy() }
         if new.historyId != lastHistoryId {
             lastHistoryId = new.historyId
+            onDirty?()
             if !suppressUndoRegistration { registerUndoStep(label: new.undoLabel) }
         }
     }

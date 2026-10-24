@@ -4,13 +4,14 @@ import UIKit
 @main
 struct FigCraftApp: App {
     init() {
+        FigCloudContainer.prepare()
         // Installed fonts reach the engine once, in the background (the engine scans none on iOS).
         FontLoader.loadOnce()
     }
 
     var body: some Scene {
         DocumentGroup(newDocument: { FigCraftDocument() }) { file in
-            DocumentScene(document: file.document)
+            DocumentScene(document: file.document, fileURL: file.fileURL)
         }
         .commands {
             FigCraftCommands()
@@ -31,11 +32,17 @@ struct FigCraftApp: App {
 /// One document window: the root view plus the hook that mirrors the engine history on this scene's UndoManager.
 private struct DocumentScene: View {
     let document: FigCraftDocument
+    let fileURL: URL?
     @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         EditorRootView(model: document.model)
-            .onAppear { document.model.undoManager = undoManager }
+            .onAppear {
+                document.model.undoManager = undoManager
+                document.setBrowserURL(fileURL)
+            }
+            .onChange(of: fileURL) { _, new in document.setBrowserURL(new) }
+            .onDisappear { document.flushCopy() }
             .onChange(of: undoManager) { _, manager in document.model.undoManager = manager }
     }
 }
