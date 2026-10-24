@@ -47,6 +47,12 @@ struct PanelDockView: View {
                     .padding(8)
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                .task {
+                    await Task.yield()
+                    guard let panel = model.panelDock.selectedPanel(leading: leading),
+                          let group = groups.first(where: { $0.tabs.contains(panel) }) else { return }
+                    reader.scrollTo(group.id, anchor: .top)
+                }
                 .onChange(of: model.panelDock.lastShown) { _, panel in
                     guard let panel, panel.isLeading == leading,
                           let group = groups.first(where: { $0.tabs.contains(panel) }) else { return }

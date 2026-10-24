@@ -30,7 +30,11 @@ struct PanelDockGroup: Codable, Identifiable {
     var leading: [PanelDockGroup] = [] { didSet { save() } }
     var trailing: [PanelDockGroup] = [] { didSet { save() } }
     var lastShown: DockPanelID?
+    var lastShownLeading: DockPanelID = .layers { didSet { UserDefaults.standard.set(lastShownLeading.rawValue, forKey: leadingSelectionKey) } }
+    var lastShownTrailing: DockPanelID = .design { didSet { UserDefaults.standard.set(lastShownTrailing.rawValue, forKey: trailingSelectionKey) } }
     @ObservationIgnored private let key = "figcraft.panelDock.v1"
+    @ObservationIgnored private let leadingSelectionKey = "figcraft.panelDock.selectedLeading"
+    @ObservationIgnored private let trailingSelectionKey = "figcraft.panelDock.selectedTrailing"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: key),
@@ -40,11 +44,17 @@ struct PanelDockGroup: Codable, Identifiable {
         } else {
             reset()
         }
+        if let raw = UserDefaults.standard.string(forKey: leadingSelectionKey),
+           let panel = DockPanelID(rawValue: raw), isVisible(panel) { lastShownLeading = panel }
+        if let raw = UserDefaults.standard.string(forKey: trailingSelectionKey),
+           let panel = DockPanelID(rawValue: raw), isVisible(panel) { lastShownTrailing = panel }
     }
 
     func reset() {
         leading = [PanelDockGroup(tabs: [.layers, .assets], selected: .layers)]
         trailing = [PanelDockGroup(tabs: [.design, .prototype, .inspect], selected: .design)]
+        lastShownLeading = .layers
+        lastShownTrailing = .design
     }
 
     func show(_ panel: DockPanelID) {
@@ -57,15 +67,20 @@ struct PanelDockGroup: Codable, Identifiable {
         }
         set(groups, leading: panel.isLeading)
         lastShown = panel
+        if panel.isLeading { lastShownLeading = panel } else { lastShownTrailing = panel }
     }
 
     func hide(_ panel: DockPanelID) {
         var groups = panel.isLeading ? leading : trailing
         guard let index = groups.firstIndex(where: { $0.tabs.contains(panel) }) else { return }
+        let wasLastShown = panel == (panel.isLeading ? lastShownLeading : lastShownTrailing)
         groups[index].tabs.removeAll { $0 == panel }
         if groups[index].tabs.isEmpty { groups.remove(at: index) }
         else if groups[index].selected == panel { groups[index].selected = groups[index].tabs[0] }
         set(groups, leading: panel.isLeading)
+        if wasLastShown, let replacement = groups.indices.contains(index) ? groups[index].selected : groups.last?.selected {
+            if panel.isLeading { lastShownLeading = replacement } else { lastShownTrailing = replacement }
+        }
     }
 
     func collapse(_ id: UUID, leading side: Bool) {
@@ -95,10 +110,17 @@ struct PanelDockGroup: Codable, Identifiable {
         groups[targetIndex].collapsed = false
         set(groups, leading: panel.isLeading)
         lastShown = panel
+        if panel.isLeading { lastShownLeading = panel } else { lastShownTrailing = panel }
     }
 
     func isVisible(_ panel: DockPanelID) -> Bool {
         (panel.isLeading ? leading : trailing).contains { $0.tabs.contains(panel) }
+    }
+
+    func selectedPanel(leading side: Bool) -> DockPanelID? {
+        let panel = side ? lastShownLeading : lastShownTrailing
+        let groups = side ? leading : trailing
+        return groups.contains(where: { $0.tabs.contains(panel) }) ? panel : groups.first?.selected
     }
 
     private func set(_ groups: [PanelDockGroup], leading side: Bool) {

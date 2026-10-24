@@ -37,7 +37,12 @@ struct EditorRootView: View {
             .frame(width: geo.size.width, height: geo.size.height)
             .onChange(of: model.panelRequest) { _, _ in
                 guard geo.size.width < 700 else { return }
-                ui.phoneSheet = model.lastRequestedPanel.isLeading ? .layers : .design
+                let sheet: PhoneSheet = switch model.lastRequestedPanel {
+                case .layers, .assets: .layers
+                case .design, .inspect: .design
+                case .prototype: .prototype
+                }
+                ui.showPhoneSheet(sheet)
             }
         }
         .environment(ui)

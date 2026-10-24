@@ -1,5 +1,24 @@
 # FigCraft: user-story UX validation, iPadOS and iOS
 
+## Latest checkpoint — 2026-10-24
+
+Luna's current iPad run passed all 11 Swift unit cases, including off-main document creation/readback with a persisted rectangle and seeded Untitled readiness. The focused dock and opacity/prototype UI cases both stopped in the native DocumentGroup browser before their product assertions: local storage was unreachable after Browse and New Design was not hittable. The next run captures the post-Browse accessibility hierarchy as text. The new iPhone toolbar panel toggle and iPad dock reveal scroll compiled in the generic simulator and signed physical-device builds, but their interactions have not been tested. The latest FigCraft app was installed in place and launched normally on Sam's iPad; this is a launch check only.
+
+## Current evidence checkpoint — 2026-10-24 18:18 EDT
+
+This checkpoint supersedes earlier status statements below. Astra reviews source/test design and Luna executes runtime cases. Latest observations are attributed to the parent/Luna/Sol handoff where no separate log inspection is stated; no new runtime test was performed for this report. Times identify this review, not invented execution timestamps.
+
+| Platform | Classification | Current evidence and limit | Evidence path / attribution |
+|---|---|---|---|
+| Shared model | PASS | BridgeSmoke9 and Rust32 pass. Seeded Untitled readback preserves expected readiness/content. | `apple/build/results/luna-unit.log`, `luna-doc-lifecycle.log`; parent/Luna handoff |
+| Shared model | Fixed in source; regression pending | 4cf WIP replaces unsafe MainActor-assumed document construction with handle/lazy-model architecture. First background round-trip regression failed a revision3-versus4 expectation, not content loss. Replacement asserts real rectangle content; compiled, unrun. | `apple/build/results/luna-doc-lifecycle.log`; parent/Sol handoff |
+| iPadOS | Setup blocked / unreached | UI creation never passed its full foreground seeded-document precondition. Dock and opacity/prototype outcomes are unknown; dynamic-button and browser-overlay setup failures are not those feature failures. | `apple/build/results/luna-current-stories.log`, `luna-dock-final.log` |
+| iOS | NOT TESTED | Phone document creation, layer editing and adaptive panel experience have no runtime pass yet. | No phone runtime evidence in current handoff |
+
+**Common limits:** Native DocumentGroup edit → normal close → process relaunch → reopen of the same native file remains unverified. UndoManager registration paths were found; absent explicit publisher sends are not an autosave defect. Photo's explicit flat-image copy queue is a separate verified workflow. Do not classify every raw control-frame count below44pt as a UX defect: stock toolbar controls may use system hit regions; require actual hit-testing/interaction evidence. Light's missing manual removal and unavailable optional model remain explicit capability gaps. Current phone results apply only to Photo EditCopy; the other apps' iPhone UX remains unrun.
+
+Historical matrices and earlier evidence follow; retain their executable selectors, but use this checkpoint for current pass/fail classification.
+
 Luna's dock runs have not reached an editor: the initial run stayed in the document browser, a duplicate New Design element was unhittable, and a dynamic Files-browser query produced a stale snapshot. The current shared fixture navigates Browse to On My iPad/iPhone, selects the FigCraft folder when shown, and requires a foreground hittable canvas with the browser gone plus demoReady. This fixture compiles but has not been run. These setup failures are not proof of a product dock failure. CONTRACT still lists foreign editable-copy, fullscreen, Libraries panel and several import/gesture gaps; confirm current source/runtime before closing them.
 
 ## Story-to-test matrix

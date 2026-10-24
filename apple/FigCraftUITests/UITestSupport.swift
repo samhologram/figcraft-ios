@@ -52,7 +52,8 @@ class FigCraftUITestCase: XCTestCase {
             else if locationCell.exists && locationCell.isHittable { locationCell.tap(); pause(0.5) }
             else if locationText.exists && locationText.isHittable { locationText.tap(); pause(0.5) }
             else {
-                XCTFail("The native Browse view has no reachable \(localLabel) location")
+                attach("browse-locations", app.debugDescription)
+                XCTFail("The native Browse view has no reachable \(localLabel) location; see browse-locations text attachment")
                 return false
             }
             let folder = app.cells.matching(NSPredicate(format: "label == %@", "FigCraft")).firstMatch

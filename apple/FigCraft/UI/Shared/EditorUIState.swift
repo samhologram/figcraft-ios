@@ -11,6 +11,16 @@ enum PhoneSheet: String, Identifiable {
 final class EditorUIState {
     /// iPhone: the panel sheet that is up (root presentations wait for it to close).
     var phoneSheet: PhoneSheet?
+    var lastPhoneSheet: PhoneSheet = .layers
+
+    func showPhoneSheet(_ sheet: PhoneSheet) {
+        lastPhoneSheet = sheet
+        phoneSheet = sheet
+    }
+
+    func togglePhonePanels() {
+        phoneSheet = phoneSheet == nil ? lastPhoneSheet : nil
+    }
     /// iPad (narrow window): the sidebar and inspector are overlays; only one shows at a time.
     var padOverlayWide = true
     /// Requests to open the comments / version history sheets (the root view presents them).

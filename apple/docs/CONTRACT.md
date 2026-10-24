@@ -343,6 +343,10 @@ iPad dock; iPhone keeps panel sheets and selects the requested tab. `panel.<id>`
 `panelHeader.<id>.collapse|menu` identifies the group controls. The header row itself is not an accessibility
 element because that masks the child actions. Hide is an explicit group-menu action. Reopening the same selected panel
 increments `EditorModel.panelRequest` to scroll both readers.
+The iPad toolbar's `sidebar.toggle` and `inspector.toggle` hide or reveal their respective dock columns without
+changing group, tab or collapsed state. Revealing a column scrolls its last selected group and tab into view. The
+iPhone toolbar's `panels.toggle` hides or reveals the panel sheet, reopening the most recently used sheet and tab.
+Selecting a panel from the Window menu reveals its column or sheet.
 Only a panel whose existing content is mounted may be offered as functional. `Window` menu entries call `show(_:)`.
 The current dock implementation offers Layers, Assets, Design, Prototype and Inspect. Their selected tab is scrolled
 into view on selection on both iPad and iPhone; group selection scrolls the iPad dock vertically. The existing panel

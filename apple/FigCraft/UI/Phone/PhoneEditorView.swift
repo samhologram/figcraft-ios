@@ -22,6 +22,13 @@ struct PhoneEditorView: View {
             }
             .background { ToolShortcutButtons(model: model) }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { ui.togglePhonePanels() } label: {
+                        Label("Panels", systemImage: "sidebar.trailing")
+                    }
+                    .accessibilityIdentifier("panels.toggle")
+                    .accessibilityValue(ui.phoneSheet == nil ? "Hidden" : "Shown")
+                }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { model.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                         .disabled(!model.state.canUndo)
@@ -65,7 +72,8 @@ struct PhoneEditorView: View {
 
     private func sheetButton(_ sheet: PhoneSheet, _ title: String, _ symbol: String) -> some View {
         Button {
-            ui.phoneSheet = ui.phoneSheet == sheet ? nil : sheet
+            if ui.phoneSheet == sheet { ui.phoneSheet = nil }
+            else { ui.showPhoneSheet(sheet) }
         } label: {
             VStack(spacing: 1) {
                 Image(systemName: symbol).font(.system(size: 16))
