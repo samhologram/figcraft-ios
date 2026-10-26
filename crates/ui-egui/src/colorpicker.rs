@@ -199,7 +199,7 @@ fn finish(app: &mut FigApp) {
 
 /// The selected gradient stop in the picker (shared with the on-canvas stops).
 pub fn stop_id() -> Id {
-    Id::new("cp_stop")
+    Id::unique("cp_stop")
 }
 
 /// Apply a swatch colour: a solid paint's colour, or the selected gradient stop's.
@@ -224,7 +224,7 @@ fn set_color(app: &mut FigApp, target: &PickerTarget, paint: &mut Paint, c: Colo
 fn page_colors(app: &FigApp, ui: &Ui) -> Vec<Color> {
     let Ok(ds) = app.session.ds() else { return vec![] };
     let key = (std::sync::Arc::as_ptr(&ds.doc) as usize, ds.page);
-    let cache_id = Id::new("cp_doc_colors");
+    let cache_id = Id::unique("cp_doc_colors");
     if let Some((k, colors)) = ui.data(|d| d.get_temp::<((usize, figcraft_doc::NodeId), Vec<Color>)>(cache_id))
         && k == key
     {
@@ -236,19 +236,21 @@ fn page_colors(app: &FigApp, ui: &Ui) -> Vec<Color> {
 }
 
 /// Colour models the value row can show.
-const MODELS: [&str; 5] = ["Hex", "RGB", "HSL", "HSB", "CSS"];
+const MODELS: [&str; 7] = ["Hex", "RGB", "HSL", "HSB", "LCH", "OKLCH", "CSS"];
 
 /// The model dropdown with its fields and the alpha field. Returns a new colour and whether the
 /// edit is done (false while a field is being scrubbed).
 fn model_fields(ui: &mut Ui, c: Color) -> Option<(Color, bool)> {
-    let model_id = Id::new("cp_model");
+    let model_id = Id::unique("cp_model");
     let model: usize = ui.data(|d| d.get_temp(model_id)).unwrap_or(0).min(MODELS.len() - 1);
     let mut out: Option<Color> = None;
     let mut done = true;
     ui.horizontal(|ui| {
         ui.add_space(16.0);
         ui.spacing_mut().item_spacing.x = 4.0;
-        let resp = widgets::dropdown(ui, MODELS.get(model).copied().unwrap_or("Hex"), 52.0, None);
+        // "LCH" and "OKLCH" need a wider dropdown; their fields and alpha give up the room.
+        let wide = matches!(MODELS.get(model).copied(), Some("LCH" | "OKLCH"));
+        let resp = widgets::dropdown(ui, MODELS.get(model).copied().unwrap_or("Hex"), if wide { 66.0 } else { 52.0 }, None);
         crate::right::menu_popup(&resp).show(|ui| {
             for (i, m) in MODELS.iter().enumerate() {
                 if crate::right::menu_item(ui, m, "") {
@@ -257,25 +259,22 @@ fn model_fields(ui: &mut Ui, c: Color) -> Option<(Color, bool)> {
                 }
             }
         });
-        let num = |ui: &mut Ui, id: &str, v: f64, w: f32| match widgets::number_field(
-            ui,
-            Id::new(("cp_f", id)),
-            widgets::Lead::None,
-            Some(v.round()),
-            "",
-            w,
-            1.0,
-        ) {
-            Some(widgets::FieldEdit::Set(x)) => Some((x, true)),
-            Some(widgets::FieldEdit::Scrub(x, end)) => Some((x, end)),
-            None => None,
+        // `decimals` places shown; `step` is what a scrub or arrow moves by.
+        let num = |ui: &mut Ui, id: &str, v: f64, w: f32, decimals: i32, step: f64| {
+            let p = 10f64.powi(decimals);
+            match widgets::number_field(ui, Id::unique(("cp_f", id)), widgets::Lead::None, Some((v * p).round() / p), "", w, step) {
+                Some(widgets::FieldEdit::Set(x)) => Some((x, true)),
+                Some(widgets::FieldEdit::Scrub(x, end)) => Some((x, end)),
+                None => None,
+            }
         };
-        match MODELS.get(model).copied().unwrap_or("Hex") {
+        let name = MODELS.get(model).copied().unwrap_or("Hex");
+        match name {
             "RGB" => {
                 let [r, g, b, _] = c.to_rgba8();
                 let vals = [f64::from(r), f64::from(g), f64::from(b)];
                 for (k, v) in vals.iter().enumerate() {
-                    if let Some((x, end)) = num(ui, ["r", "g", "b"][k.min(2)], *v, 31.0) {
+                    if let Some((x, end)) = num(ui, ["r", "g", "b"][k.min(2)], *v, 31.0, 0, 1.0) {
                         done = end;
                         let mut rgb = vals;
                         if let Some(slot) = rgb.get_mut(k) {
@@ -285,43 +284,53 @@ fn model_fields(ui: &mut Ui, c: Color) -> Option<(Color, bool)> {
                     }
                 }
             }
-            "HSL" | "HSB" => {
-                let hsl = model == 2;
-                let (h, s2, l2) = if hsl {
-                    let x = figcraft_color::Hsl::from_color(c);
-                    (x.h, x.s, x.l)
-                } else {
-                    let x = Hsb::from_color(c);
-                    (x.h, x.s, x.b)
-                };
-                let vals = [f64::from(h), f64::from(s2) * 100.0, f64::from(l2) * 100.0];
-                for (k, v) in vals.iter().enumerate() {
-                    if let Some((x, end)) = num(ui, ["h", "s", "l"][k.min(2)], *v, 31.0) {
+            "HSL" | "HSB" | "LCH" | "OKLCH" => {
+                let Some(spec) = Polar::of(name) else { return };
+                // The values last shown or typed stay while the colour is theirs: a chroma lowered to
+                // fit sRGB, or a hue on a grey, isn't read back from the colour on the next frame.
+                let kept_id = Id::unique("cp_polar");
+                let rgba = c.to_rgba8();
+                let vals = ui
+                    .data(|d| d.get_temp::<(&'static str, [f64; 3], [u8; 4])>(kept_id))
+                    .filter(|(m, _, k)| *m == name && *k == rgba)
+                    .map_or_else(|| spec.values(c), |(_, v, _)| v);
+                let mut kept = vals;
+                for (k, (v, f)) in vals.iter().zip(spec.fields()).enumerate() {
+                    let w = if !wide {
+                        31.0
+                    } else if f.decimals > 0 {
+                        30.0
+                    } else {
+                        27.0
+                    };
+                    if let Some((x, end)) = num(ui, f.id, *v, w, f.decimals, f.step) {
                         done = end;
                         let mut v3 = vals;
                         if let Some(slot) = v3.get_mut(k) {
-                            *slot = if k == 0 { x.rem_euclid(360.0) } else { x.clamp(0.0, 100.0) };
+                            *slot = if f.wraps { x.rem_euclid(360.0) } else { x.clamp(0.0, f.max) };
                         }
-                        let (h, a, b) = (v3[0] as f32, v3[1] as f32 / 100.0, v3[2] as f32 / 100.0);
-                        let col = if hsl { figcraft_color::Hsl { h, s: a, l: b }.to_color() } else { Hsb { h, s: a, b }.to_color() };
-                        out = Some(col.with_alpha(c.a));
+                        let col = spec.color(v3).with_alpha(c.a);
+                        kept = v3;
+                        out = Some(col);
                     }
                 }
+                let shown = out.unwrap_or(c).to_rgba8();
+                ui.data_mut(|d| d.insert_temp(kept_id, (name, kept, shown)));
             }
             "CSS" => {
-                if let Some(text) = widgets::text_field(ui, Id::new("cp_css"), &c.to_css(), 152.0, "") {
+                if let Some(text) = widgets::text_field(ui, Id::unique("cp_css"), &c.to_css(), 152.0, "") {
                     out = Color::parse_css(&text);
                 }
             }
             _ => {
-                if let Some(h) = widgets::text_field(ui, Id::new("cp_hex"), &c.to_hex(), 101.0, "") {
+                if let Some(h) = widgets::text_field(ui, Id::unique("cp_hex"), &c.to_hex(), 101.0, "") {
                     out = Color::from_hex_or_name(&h).map(|h| h.with_alpha(if h.a < 1.0 { h.a } else { c.a }));
                 }
             }
         }
         if MODELS.get(model) != Some(&"CSS") {
             let alpha = Some((f64::from(out.unwrap_or(c).a) * 100.0).round());
-            let edit = match widgets::number_field(ui, Id::new("cp_a"), widgets::Lead::None, alpha, "%", 44.0, 1.0) {
+            let edit = match widgets::number_field(ui, Id::unique("cp_a"), widgets::Lead::None, alpha, "%", if wide { 40.0 } else { 44.0 }, 1.0) {
                 Some(widgets::FieldEdit::Set(v)) => Some((v, true)),
                 Some(widgets::FieldEdit::Scrub(v, end)) => Some((v, end)),
                 None => None,
@@ -335,10 +344,99 @@ fn model_fields(ui: &mut Ui, c: Color) -> Option<(Color, bool)> {
     out.map(|c| (c, done))
 }
 
+/// One field of a [`Polar`] model: its id, decimals shown, scrub/arrow step and range (0..=max,
+/// or a hue that wraps at 360).
+struct PolarField {
+    id: &'static str,
+    decimals: i32,
+    step: f64,
+    max: f64,
+    wraps: bool,
+}
+
+const fn field(id: &'static str, decimals: i32, step: f64, max: f64) -> PolarField {
+    PolarField { id, decimals, step, max, wraps: false }
+}
+
+const fn hue(id: &'static str) -> PolarField {
+    PolarField { id, decimals: 0, step: 1.0, max: 360.0, wraps: true }
+}
+
+/// The three-field models: HSL, HSB, LCH and OKLCH, shown in their CSS units (percentages for
+/// saturation and lightness, OKLCH lightness in percent).
+#[derive(Clone, Copy)]
+enum Polar {
+    Hsl,
+    Hsb,
+    Lch,
+    Oklch,
+}
+
+impl Polar {
+    fn of(name: &str) -> Option<Self> {
+        Some(match name {
+            "HSL" => Self::Hsl,
+            "HSB" => Self::Hsb,
+            "LCH" => Self::Lch,
+            "OKLCH" => Self::Oklch,
+            _ => return None,
+        })
+    }
+
+    const HSL_FIELDS: [PolarField; 3] = [hue("hsl_h"), field("hsl_s", 0, 1.0, 100.0), field("hsl_l", 0, 1.0, 100.0)];
+    const HSB_FIELDS: [PolarField; 3] = [hue("hsb_h"), field("hsb_s", 0, 1.0, 100.0), field("hsb_b", 0, 1.0, 100.0)];
+    const LCH_FIELDS: [PolarField; 3] = [field("lch_l", 0, 1.0, 100.0), field("lch_c", 0, 1.0, 230.0), hue("lch_h")];
+    const OKLCH_FIELDS: [PolarField; 3] = [field("oklch_l", 0, 1.0, 100.0), field("oklch_c", 2, 0.01, 0.5), hue("oklch_h")];
+
+    const fn fields(self) -> &'static [PolarField; 3] {
+        match self {
+            Self::Hsl => &Self::HSL_FIELDS,
+            Self::Hsb => &Self::HSB_FIELDS,
+            Self::Lch => &Self::LCH_FIELDS,
+            Self::Oklch => &Self::OKLCH_FIELDS,
+        }
+    }
+
+    fn values(self, c: Color) -> [f64; 3] {
+        let v = match self {
+            Self::Hsl => {
+                let x = figcraft_color::Hsl::from_color(c);
+                [x.h, x.s * 100.0, x.l * 100.0]
+            }
+            Self::Hsb => {
+                let x = Hsb::from_color(c);
+                [x.h, x.s * 100.0, x.b * 100.0]
+            }
+            Self::Lch => {
+                let x = figcraft_color::Lch::from_color(c);
+                [x.l, x.c, x.h]
+            }
+            Self::Oklch => {
+                let x = figcraft_color::Oklch::from_color(c);
+                [x.l * 100.0, x.c, x.h]
+            }
+        };
+        v.map(f64::from)
+    }
+
+    /// Opaque.
+    fn color(self, v: [f64; 3]) -> Color {
+        let [a, b, d] = v.map(|v| v as f32);
+        match self {
+            Self::Hsl => figcraft_color::Hsl { h: a, s: b / 100.0, l: d / 100.0 }.to_color(),
+            Self::Hsb => Hsb { h: a, s: b / 100.0, b: d / 100.0 }.to_color(),
+            Self::Lch => figcraft_color::Lch { l: a, c: b, h: d }.to_color(),
+            Self::Oklch => figcraft_color::Oklch { l: a / 100.0, c: b, h: d }.to_color(),
+        }
+    }
+}
+
 fn hue_color(ctx: &egui::Context, h: f32) -> Color32 {
     doc_c32(ctx, Hsb { h, s: 1.0, b: 1.0 }.to_color())
 }
 
+/// Draw the saturation/value square and its knob, updating `hsb.s` and `hsb.b` on click or
+/// drag; returns `(changed, done)`.
 fn sv_square(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
     // White → hue horizontally, then transparent → black vertically.
     let mut m = Mesh::default();
@@ -362,7 +460,7 @@ fn sv_square(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
     m2.add_triangle(0, 1, 2);
     m2.add_triangle(0, 2, 3);
     ui.painter().add(m2);
-    let resp = ui.interact(rect, Id::new("cp_sv"), Sense::click_and_drag());
+    let resp = ui.interact(rect, Id::unique("cp_sv"), Sense::click_and_drag());
     let mut changed = false;
     if (resp.dragged() || resp.clicked() || resp.drag_started())
         && let Some(p) = resp.interact_pointer_pos()
@@ -377,6 +475,8 @@ fn sv_square(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
     (changed, resp.drag_stopped() || resp.clicked())
 }
 
+/// Draw the hue gradient and knob, updating `hsb.h` clamped below 360; returns
+/// `(changed, done)`.
 fn hue_slider(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
     let n = 12;
     let mut m = Mesh::default();
@@ -393,7 +493,7 @@ fn hue_slider(ui: &mut Ui, rect: Rect, hsb: &mut Hsb) -> (bool, bool) {
         }
     }
     ui.painter().add(m);
-    slider_knob(ui, rect, hsb.h / 360.0, Id::new("cp_hue"))
+    slider_knob(ui, rect, hsb.h / 360.0, Id::unique("cp_hue"))
         .map(|(t, done)| {
             hsb.h = (t * 360.0).clamp(0.0, 359.9);
             (true, done)
@@ -417,6 +517,8 @@ fn slider_knob(ui: &mut Ui, rect: Rect, t: f32, id: Id) -> Option<(f32, bool)> {
     None
 }
 
+/// Draw the checkerboard and transparent-to-opaque alpha gradient with a knob; returns the
+/// new alpha and done state, or `None` when the slider is not interacting.
 fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
     widgets::checker(&ui.painter().with_clip_rect(rect), rect, rect.height() / 2.0);
     let mut m = Mesh::default();
@@ -432,11 +534,27 @@ fn alpha_slider(ui: &mut Ui, rect: Rect, color: Color) -> Option<(f32, bool)> {
     m.add_triangle(0, 1, 2);
     m.add_triangle(0, 2, 3);
     ui.painter().add(m);
-    slider_knob(ui, rect, color.a, Id::new("cp_alpha"))
+    slider_knob(ui, rect, color.a, Id::unique("cp_alpha"))
 }
 
+/// The colour picker window's area id. A fixed id (not `Window::new`'s, which egui keys by
+/// `Id::unique(Some(title))`) so the style picker can tell a click inside the picker from one outside.
+pub fn window_id() -> Id {
+    Id::unique("color_picker")
+}
+
+/// Draw the colour picker for the current target: close it when there is no target or the
+/// target's selection no longer matches, otherwise apply eyedropper, paint-kind, colour and
+/// gradient-stop edits live, positioned beside a plugin field when applicable.
 pub fn show(app: &mut FigApp, ctx: &egui::Context) {
-    let Some(target) = app.ui.picker.clone() else { return };
+    let Some(target) = app.ui.picker.clone() else {
+        // A colour sampled for a picker that has closed has no paint to go to.
+        app.session.tool.picked = None;
+        if app.session.tool.pick_only {
+            app.run("tool.move", json!({}));
+        }
+        return;
+    };
     // A layer's picker belongs to the selection it was opened for: once that changes, close it
     // rather than keep editing layers that are no longer selected.
     let stale = match &target {
@@ -463,6 +581,9 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
     let mut open = true;
     let mut close_now = false;
     egui::Window::new("color_picker")
+        // A fixed area id so the style picker can tell a click in here from a click outside
+        // (`Window::new` alone would key the area by `Id::unique(Some(title))`).
+        .id(window_id())
         .title_bar(false)
         .fixed_pos(pos)
         .fixed_size(vec2(240.0, 0.0))
@@ -470,11 +591,15 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
         .open(&mut open)
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            // The eyedropper's colour goes to this picker's paint (a stroke, an effect, a gradient stop...).
+            if let Some(c) = app.session.tool.picked.take() {
+                set_color(app, &target, &mut paint, c, stop_id(), ui);
+            }
             // Header.
             let (hr, _) = ui.allocate_exact_size(vec2(240.0, 40.0), Sense::hover());
             ui.painter().text(pos2(hr.min.x + 16.0, hr.center().y), Align2::LEFT_CENTER, tr("Custom"), semibold(11.0), t.text);
             let cr = Rect::from_center_size(pos2(hr.max.x - 20.0, hr.center().y), vec2(24.0, 24.0));
-            let cresp = ui.interact(cr, Id::new("cp_close"), Sense::click());
+            let cresp = ui.interact(cr, Id::unique("cp_close"), Sense::click());
             icons::paint(ui.painter(), cr.shrink(6.0), Icon::Close, t.icon);
             if cresp.clicked() {
                 close_now = true;
@@ -585,11 +710,11 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                 let mut changed = false;
                 let mut done = false;
                 // The bar first, so the stops on it take their own clicks.
-                let bresp = ui.interact(bar, Id::new("cp_bar"), Sense::click());
+                let bresp = ui.interact(bar, Id::unique("cp_bar"), Sense::click());
                 for (i, s) in g.stops.clone().iter().enumerate() {
                     let x = bar.min.x + s.position * bar.width();
                     let r = Rect::from_center_size(pos2(x, bar.center().y), vec2(12.0, 18.0));
-                    let resp = ui.interact(r, Id::new(("cp_stopk", i)), Sense::click_and_drag());
+                    let resp = ui.interact(r, Id::unique(("cp_stopk", i)), Sense::click_and_drag());
                     ui.painter().rect_filled(r, CornerRadius::same(3), doc_c32(ui.ctx(), s.color.with_alpha(1.0)));
                     ui.painter().rect_stroke(
                         r,
@@ -753,7 +878,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
             }
             if let Some(color) = edit_color {
                 let mut hsb = ui
-                    .data(|d| d.get_temp::<(f32, f32, f32, [u8; 4])>(Id::new("cp_hsb")))
+                    .data(|d| d.get_temp::<(f32, f32, f32, [u8; 4])>(Id::unique("cp_hsb")))
                     .filter(|(_, _, _, rgba)| *rgba == color.to_rgba8())
                     .map(|(h, s, b, _)| Hsb { h, s, b })
                     .unwrap_or_else(|| Hsb::from_color(color));
@@ -772,8 +897,7 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                 )
                 .clicked()
                 {
-                    app.ui.picker = None;
-                    app.run("edit.pickColor", json!({}));
+                    app.run("edit.pickColor", json!({"apply": false}));
                     return;
                 }
                 let (c2, d2) = hue_slider(ui, hr, &mut hsb);
@@ -791,14 +915,14 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
                     changed = true;
                     done |= d;
                 }
-                // Colour model fields (Hex, RGB, HSL, HSB or CSS) + alpha.
+                // Colour model fields (Hex, RGB, HSL, HSB, LCH, OKLCH or CSS) + alpha.
                 if let Some((c, d)) = model_fields(ui, nc) {
                     nc = c;
                     hsb = Hsb::from_color(nc);
                     changed = true;
                     done |= d;
                 }
-                ui.data_mut(|d| d.insert_temp(Id::new("cp_hsb"), (hsb.h, hsb.s, hsb.b, nc.to_rgba8())));
+                ui.data_mut(|d| d.insert_temp(Id::unique("cp_hsb"), (hsb.h, hsb.s, hsb.b, nc.to_rgba8())));
                 // A Display P3 colour sRGB can't show: the canvas (sRGB) shows the nearest one.
                 if app.session.doc().is_ok_and(|d| d.color_profile.conversion_to(figcraft_color::ColorProfile::Srgb).clips(nc)) {
                     gamut_warning(ui, &t);
@@ -964,7 +1088,7 @@ fn pattern_controls(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint:
         ui.add_space(16.0);
         let field = |ui: &mut Ui, key: &str, lead: Lead, value: f64, suffix: &str| match widgets::number_field(
             ui,
-            Id::new(key),
+            Id::unique(key),
             lead,
             Some(value),
             suffix,
@@ -1010,7 +1134,7 @@ fn saved_preset_row(ui: &mut Ui, name: &str) -> Option<PresetAction> {
     let w = ui.available_width().max(180.0);
     let (r, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::click());
     let del = Rect::from_center_size(pos2(r.max.x - 14.0, r.center().y), vec2(20.0, 20.0));
-    let del_resp = ui.interact(del, ui.id().with(("cp_preset_del", name)), Sense::click()).tip(tr("Delete preset"));
+    let del_resp = ui.interact(del, ui.scope_id().with(("cp_preset_del", name)), Sense::click()).tip(tr("Delete preset"));
     let hot = resp.hovered() || del_resp.hovered();
     if hot {
         ui.painter().rect_filled(r, CornerRadius::same(5), t.menu_hover);
@@ -1042,7 +1166,7 @@ fn image_presets(app: &mut FigApp, ui: &mut Ui, target: &PickerTarget, paint: &m
         .find(|(_, f)| *f == filters)
         .map(|(name, _)| name)
         .unwrap_or_else(|| if filters.is_identity() { tr("No preset").into() } else { tr("Custom").into() });
-    let name_id = Id::new("cp_preset_name");
+    let name_id = Id::unique("cp_preset_name");
     let mut naming: Option<String> = ui.data(|d| d.get_temp(name_id));
     let mut action = None;
     ui.horizontal(|ui| {

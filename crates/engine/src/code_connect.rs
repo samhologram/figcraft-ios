@@ -14,9 +14,9 @@ use figcraft_doc::*;
 use serde_json::{Value, json};
 
 use crate::cmd::CommandSpec;
-use crate::codegen::CodeLang;
+use crate::codegen::{CodeLang, Ctx};
 use crate::component_codegen::{Component, Param, ParamKind, describe, instance_values, js_string, main_of, value_expr};
-use crate::components::variant_set;
+use crate::components::{slots_of, variant_set};
 use crate::params::*;
 use crate::{EngineError, Result, Session, bad, spec};
 
@@ -37,7 +37,8 @@ const MAX_WARNINGS: usize = 50;
 
 /// The languages a component can be connected in.
 pub fn language(s: &str) -> Option<CodeLang> {
-    CodeLang::from_id(s).filter(|l| matches!(l, CodeLang::React | CodeLang::Leptos | CodeLang::SwiftUi | CodeLang::Compose))
+    CodeLang::from_id(s)
+        .filter(|l| matches!(l, CodeLang::React | CodeLang::Leptos | CodeLang::Vue | CodeLang::SwiftUi | CodeLang::Compose | CodeLang::ArkUi))
 }
 
 /// The layer `id`'s links are stored on: its component set, else its component (an instance's
@@ -64,20 +65,114 @@ pub fn import_line(link: &CodeLink, lang: CodeLang) -> String {
     let path = &link.import_path;
     match lang {
         _ if path.is_empty() => String::new(),
-        CodeLang::React => format!("import {{ {} }} from {};", link.name.split('.').next().unwrap_or_default(), js_string(path)),
+        CodeLang::React | CodeLang::ArkUi => format!("import {{ {} }} from {};", link.name.split('.').next().unwrap_or_default(), js_string(path)),
         CodeLang::Leptos => format!("use {path}::{};", link.name.split('.').next().unwrap_or_default()),
+        // A single-file component is a default export.
+        CodeLang::Vue => format!("import {} from {};", link.name.split('.').next().unwrap_or_default(), js_string(path)),
         _ => format!("import {path}"),
     }
 }
 
-/// Layer `id`'s code with `link`: the import line and the snippet (an instance's values, else the
-/// defaults). `None` when `id` isn't a component, set or instance.
+/// Layer `id`'s code with `link`: the import lines (its own and those of connected components its
+/// instance swaps place) and the snippet (an instance's values, else the defaults). `None` when
+/// `id` isn't a component, set or instance.
 pub fn connected_code(doc: &Document, id: NodeId, lang: CodeLang, link: &CodeLink) -> Option<String> {
     let c = main_of(doc, id).and_then(|m| describe(doc, m))?;
     let values = instance_values(doc, id, &c).unwrap_or_else(|| c.params.iter().map(|p| (p.prop.clone(), p.default.clone())).collect());
-    let snippet = render(doc, &c, &values, link, lang, "");
-    let import = import_line(link, lang);
-    Some(if import.is_empty() { snippet } else { format!("{import}\n\n{snippet}") })
+    let mut imports = Vec::new();
+    snippet_imports(doc, &c, &values, link, lang, &mut imports);
+    Some(with_imports(&imports, render(doc, &c, &values, link, lang, "")))
+}
+
+/// `code` with `imports` at the top: joined to the import block it starts with, else apart.
+pub fn with_imports(imports: &[String], code: String) -> String {
+    match imports.join("\n") {
+        i if i.is_empty() => code,
+        i if code.starts_with("import ") || code.starts_with("use ") => format!("{i}\n{code}"),
+        i => format!("{i}\n\n{code}"),
+    }
+}
+
+/// Adds `line` to `out` unless it's empty or already there.
+fn add(out: &mut Vec<String>, line: String) {
+    if !line.is_empty() && !out.contains(&line) {
+        out.push(line);
+    }
+}
+
+/// The import lines a connected snippet needs: its own and those of the connected components its
+/// instance swaps place (the ones its template shows).
+fn snippet_imports(doc: &Document, c: &Component, values: &[(String, Value)], link: &CodeLink, lang: CodeLang, out: &mut Vec<String>) {
+    add(out, import_line(link, lang));
+    for piece in pieces(&link.template) {
+        if let Piece::Value { name, .. } = piece
+            && let Some((p, v)) = find(c, values, name)
+            && p.kind == ParamKind::InstanceSwap
+            && let Some(l) = id_of(v).and_then(|i| self::link(doc, i, lang))
+        {
+            add(out, import_line(l, lang));
+        }
+    }
+}
+
+/// The import lines of the connected components the generated code of layer `id` calls
+/// (instances in its tree, in a component's definition and in the slots an instance fills), once
+/// each in tree order. A connected `id` shows its snippet ([`connected_code`]) instead.
+pub fn tree_imports(doc: &Document, id: NodeId, lang: CodeLang) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(n) = doc.node(id) else { return out };
+    let c = main_of(doc, id).and_then(|m| describe(doc, m));
+    match (&n.kind, &c) {
+        // Its call (the slots it fills), then its component's definition.
+        (NodeKind::Instance { .. }, Some(c)) => {
+            call_imports(doc, id, lang, 0, &mut out);
+            tree(&Ctx { doc, root: c.comp, comp: Some(c), base: 0 }, c.comp, lang, 0, &mut out);
+        }
+        (NodeKind::Component { .. } | NodeKind::ComponentSet { .. }, Some(c)) => {
+            tree(&Ctx { doc, root: c.comp, comp: Some(c), base: 0 }, c.comp, lang, 0, &mut out)
+        }
+        _ => tree(&Ctx::new(doc, id), id, lang, 0, &mut out),
+    }
+    out
+}
+
+/// Imports under layer `id` as the code walk sees it: its visible children, instances as calls
+/// (one an instance swap parameter places is that parameter). shortcut: the depth cap counts from
+/// the tree's root, not from each slot's; align them if a deep slot tree shows a stray import.
+fn tree(ctx: &Ctx, id: NodeId, lang: CodeLang, depth: usize, out: &mut Vec<String>) {
+    let Some(n) = ctx.doc.node(id) else { return };
+    if ctx.too_deep(depth) {
+        return;
+    }
+    for k in ctx.kids(n) {
+        let Some(kn) = ctx.doc.node(k) else { continue };
+        let call = matches!(kn.kind, NodeKind::Instance { .. }) && main_of(ctx.doc, k).is_some();
+        match (call, ctx.param(kn, "mainComponent")) {
+            (true, Some(_)) => {}
+            (true, None) => call_imports(ctx.doc, k, lang, depth + 1, out),
+            (false, _) => tree(ctx, k, lang, depth + 1, out),
+        }
+    }
+}
+
+/// The imports instance `id` placed as a call brings: a connected one's snippet's, else those of
+/// the content it puts in its slots.
+fn call_imports(doc: &Document, id: NodeId, lang: CodeLang, depth: usize, out: &mut Vec<String>) {
+    let Some(c) = main_of(doc, id).and_then(|m| describe(doc, m)) else { return };
+    let Some(values) = instance_values(doc, id, &c) else { return };
+    if let Some(l) = link(doc, id, lang) {
+        return snippet_imports(doc, &c, &values, l, lang, out);
+    }
+    let slots = slots_of(doc, id);
+    for (p, (_, v)) in c.params.iter().zip(&values) {
+        if p.kind == ParamKind::Slot
+            && v.as_bool() == Some(true)
+            && let Some((slot, _)) = slots.iter().find(|(_, name)| *name == p.prop)
+        {
+            // The same depth base as the slot's generated content, so its connected children count.
+            tree(&Ctx { doc, root: *slot, comp: None, base: depth }, *slot, lang, depth + 1, out);
+        }
+    }
 }
 
 // ------------------------------------------------------------------ templates
@@ -174,32 +269,171 @@ fn expr(doc: &Document, c: &Component, p: &Param, v: &Value, lang: CodeLang) -> 
     match (swapped, lang) {
         (Some(l), CodeLang::React) => format!("<{} />", l.name),
         (Some(l), CodeLang::Leptos) => format!("|| view! {{ <{} /> }}", l.name),
+        // A Vue binding takes the component itself.
+        (Some(l), CodeLang::Vue) => l.name.clone(),
         (Some(l), CodeLang::SwiftUi) => format!("{}()", l.name),
+        (Some(l), CodeLang::ArkUi) => format!("() => {{ {}() }}", l.name),
         (Some(l), _) => format!("{{ {}() }}", l.name),
         (None, _) => value_expr(doc, c, p, v, lang),
     }
 }
 
+/// Template `t` as pieces. One that doesn't parse, or that skipped `check` (a hand-edited file)
+/// and is far too long, stays as written: parsing rescans after each literal brace.
+fn pieces(t: &str) -> Vec<Piece<'_>> {
+    let checkable = t.len() <= MAX_TEMPLATE * 4;
+    checkable.then(|| parse(t).ok()).flatten().unwrap_or_else(|| vec![Piece::Text(t)])
+}
+
+/// Whether `s` ends inside an unclosed opening tag (no `>` outside quotes since the last `<`).
+fn inside_open_tag(s: &str) -> bool {
+    let mut in_tag = false;
+    let mut quote = None;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                '<' if !in_tag && chars.peek().is_some_and(|ch| ch.is_ascii_alphabetic() || matches!(*ch, '/' | '!' | '?')) => {
+                    in_tag = true;
+                }
+                '>' if in_tag => in_tag = false,
+                '"' | '\'' if in_tag => quote = Some(c),
+                _ => {}
+            },
+        }
+    }
+    in_tag
+}
+
+/// Where a placeholder sits in a Vue template: whether the attribute is bound, and the quote the
+/// template already opened (if any). `None` when it isn't in an attribute at all.
+fn vue_attribute(out: &str) -> Option<(bool, Option<char>)> {
+    let end = out.trim_end();
+    if !inside_open_tag(end) {
+        return None;
+    }
+    let (after, quote) = match end.chars().last() {
+        Some(q @ ('"' | '\'')) => (&end[..end.len() - q.len_utf8()], Some(q)),
+        _ => (end, None),
+    };
+    let after = after.trim_end();
+    let eq = after.rfind('=')?;
+    // The placeholder must follow the `=` (or its opening quote) directly; text after a closed
+    // attribute (`<Card title='Buy'>`) is template content, not an attribute value.
+    if !after[eq + 1..].trim().is_empty() {
+        return None;
+    }
+    let before = after[..eq].trim_end();
+    let name: String = before
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '@' | '.' | '[' | ']'))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if name.is_empty() {
+        return None;
+    }
+    let bound = name.starts_with(':') || name.starts_with("v-bind:") || name.starts_with('@') || name.starts_with("v-on:") || name.starts_with("v-");
+    Some((bound, quote))
+}
+
+/// An expression written into an HTML attribute opened with `quote`: its own delimiter and markup
+/// become entities, so Vue's parser hands the expression its string literal intact.
+fn html_attr_expr(e: &str, quote: Option<char>) -> String {
+    let e = e.replace('&', "&amp;").replace('<', "&lt;");
+    match quote {
+        Some('\'') => e.replace('\'', "&#39;"),
+        _ => e.replace('"', "&quot;"),
+    }
+}
+
+/// Literal text written into an HTML attribute opened with `quote`.
+fn html_attr_text(s: &str, quote: Option<char>) -> String {
+    let s = s.replace('&', "&amp;").replace('<', "&lt;");
+    match quote {
+        Some('\'') => s.replace('\'', "&#39;"),
+        _ => s.replace('"', "&quot;"),
+    }
+}
+
+/// Literal text in Vue template content: braces would start an interpolation, so they are escaped.
+fn html_text(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('{', "&#123;").replace('}', "&#125;")
+}
+
 /// `link`'s template with `values` (one per parameter of `c`), every line prefixed by `pad`.
 pub(crate) fn render(doc: &Document, c: &Component, values: &[(String, Value)], link: &CodeLink, lang: CodeLang, pad: &str) -> String {
-    // A template that skipped `check` (a hand-edited file) and is far too long stays as written:
-    // parsing rescans after each literal brace.
-    let checkable = link.template.len() <= MAX_TEMPLATE * 4;
-    let pieces = checkable.then(|| parse(&link.template).ok()).flatten().unwrap_or_else(|| vec![Piece::Text(&link.template)]);
     let mut out = String::new();
-    for piece in pieces {
+    // A quoted attribute stays open across substitutions: `title="{a} {b}"` must treat both
+    // placeholders as attribute values, not text after the first one.
+    let mut vue_attr: Option<(bool, Option<char>)> = None;
+    for piece in pieces(&link.template) {
         match piece {
-            Piece::Text(t) => out.push_str(t),
+            Piece::Text(t) => {
+                out.push_str(t);
+                if let Some((_, Some(q))) = vue_attr
+                    && t.contains(q)
+                {
+                    vue_attr = None;
+                }
+            }
             Piece::Value { name, inner } => match find(c, values, name) {
                 Some((p, v)) => {
                     let e = expr(doc, c, p, v, lang);
                     // JSX and `view!`: a plain string reads best as an attribute value, anything
                     // else is an expression in braces (JSX attribute strings have no escapes).
-                    let markup = matches!(lang, CodeLang::React | CodeLang::Leptos);
-                    if !markup || (out.ends_with('=') && e.starts_with('"') && !e.contains('\\')) {
-                        out.push_str(&e);
+                    // Vue's bound attributes take an expression, so a string keeps its JS quotes
+                    // inside the attribute (as entities); a static attribute takes plain text.
+                    if lang == CodeLang::Vue {
+                        match vue_attr.or_else(|| vue_attribute(&out)) {
+                            Some((bound, quote)) => {
+                                if bound {
+                                    let expr = html_attr_expr(&e, quote);
+                                    if quote.is_some() {
+                                        out.push_str(&expr);
+                                    } else {
+                                        out.push('"');
+                                        out.push_str(&expr);
+                                        out.push('"');
+                                    }
+                                } else {
+                                    let text = match &p.kind {
+                                        ParamKind::Text | ParamKind::Variant(_) => html_attr_text(v.as_str().unwrap_or(""), quote),
+                                        _ => e.clone(),
+                                    };
+                                    if quote.is_some() {
+                                        out.push_str(&text);
+                                    } else {
+                                        out.push('"');
+                                        out.push_str(&text);
+                                        out.push('"');
+                                    }
+                                }
+                                vue_attr = quote.map(|q| (bound, Some(q)));
+                            }
+                            None => {
+                                let text = match &p.kind {
+                                    ParamKind::Text | ParamKind::Variant(_) => html_text(v.as_str().unwrap_or("")),
+                                    _ => e.clone(),
+                                };
+                                out.push_str(&text);
+                                vue_attr = None;
+                            }
+                        }
                     } else {
-                        out.push_str(&format!("{{{e}}}"));
+                        let markup = matches!(lang, CodeLang::React | CodeLang::Leptos);
+                        if !markup || (out.ends_with('=') && e.starts_with('"') && !e.contains('\\')) {
+                            out.push_str(&e);
+                        } else {
+                            out.push_str(&format!("{{{e}}}"));
+                        }
                     }
                 }
                 None => out.push_str(&format!("{{{inner}}}")),
@@ -221,7 +455,9 @@ fn default_template(c: &Component, lang: CodeLang, name: &str) -> String {
         CodeLang::Leptos => {
             format!("<{name}{} />", params.iter().map(|p| format!(" {}={{{p}}}", crate::component_codegen::rust_ident(p))).collect::<String>())
         }
+        CodeLang::Vue => format!("<{name}{} />", params.iter().map(|p| format!(" :{p}={{{p}}}")).collect::<String>()),
         CodeLang::SwiftUi => format!("{name}({})", params.iter().map(|p| format!("{p}: {{{p}}}")).collect::<Vec<_>>().join(", ")),
+        CodeLang::ArkUi => format!("{name}({{ {} }})", params.iter().map(|p| format!("{p}: {{{p}}}")).collect::<Vec<_>>().join(", ")),
         _ => format!("{name}({})", params.iter().map(|p| format!("{p} = {{{p}}}")).collect::<Vec<_>>().join(", ")),
     }
 }
@@ -239,14 +475,17 @@ pub fn check(c: &Component, link: &CodeLink, lang: CodeLang) -> std::result::Res
     }
     let path = &link.import_path;
     let path_ok = match lang {
-        CodeLang::React => !path.chars().any(|ch| ch.is_control() || ch == '"' || ch == '\\'),
+        CodeLang::React | CodeLang::ArkUi => !path.chars().any(|ch| ch.is_control() || ch == '"' || ch == '\\'),
         CodeLang::Leptos => path.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == ':'),
+        CodeLang::Vue => path.chars().all(|ch| ch.is_ascii_alphanumeric() || "_./@-".contains(ch)),
         _ => path.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'),
     };
     if path.chars().count() > MAX_IMPORT || !path_ok {
         return Err(match lang {
             CodeLang::React => format!("importPath: a module path without quotes, up to {MAX_IMPORT} characters"),
+            CodeLang::ArkUi => format!("importPath: a module path without quotes, up to {MAX_IMPORT} characters"),
             CodeLang::Leptos => format!("importPath: a Rust module path (letters, digits, _ and ::), up to {MAX_IMPORT} characters"),
+            CodeLang::Vue => format!("importPath: a module path (letters, digits, _ . / @ and -), up to {MAX_IMPORT} characters"),
             _ => format!("importPath: a module or package name (letters, digits, _ and .), up to {MAX_IMPORT} characters"),
         });
     }
@@ -282,7 +521,7 @@ fn text(cmd: &str, p: &Value, key: &str) -> Result<Option<String>> {
 /// The `language` parameter (default React).
 fn lang_param(cmd: &str, p: &Value) -> Result<CodeLang> {
     match text(cmd, p, "language")? {
-        Some(l) => language(&l).ok_or_else(|| bad(cmd, "language: react|leptos|swiftui|compose")),
+        Some(l) => language(&l).ok_or_else(|| bad(cmd, "language: react|leptos|vue|swiftui|compose|arkui")),
         None => Ok(CodeLang::React),
     }
 }
@@ -312,7 +551,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "codeConnect.set",
             "Connect to code",
-            "{id? (component, set or instance; default the selection), language?: react|leptos|swiftui|compose (default react), importPath?, name? (default the generated name), template? (default a call passing every property)}  links the component (its set, for a variant) to its code component; fields left out keep their current value. Placeholders: {property} (its name or parameter name) and {property ? \"a\" : \"b\"}; other {…} stay as written  → {component, language, code (the snippet for the layer), unknown (placeholder names that aren't properties)}",
+            "{id? (component, set or instance; default the selection), language?: react|leptos|vue|swiftui|compose|arkui (default react), importPath?, name? (default the generated name), template? (default a call passing every property)}  links the component (its set, for a variant) to its code component; fields left out keep their current value. Placeholders: {property} (its name or parameter name) and {property ? \"a\" : \"b\"}; other {…} stay as written  → {component, language, code (the snippet for the layer), unknown (placeholder names that aren't properties)}",
             true,
             |s, p| {
                 let cmd = "codeConnect.set";
@@ -427,7 +666,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
         let (Some(component), Some(lang), Some(name), Some(template)) =
             (field("component"), field("language").and_then(language), field("name"), e.get("template").and_then(Value::as_str))
         else {
-            warnings.push(format!("link {}: needs component, language (react|leptos|swiftui|compose), name and template strings", i + 1));
+            warnings.push(format!("link {}: needs component, language (react|leptos|vue|swiftui|compose|arkui), name and template strings", i + 1));
             continue;
         };
         let link = CodeLink {
