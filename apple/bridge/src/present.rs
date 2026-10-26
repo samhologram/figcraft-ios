@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use figcraft_color::Color;
-use figcraft_doc::proto::{Action, Direction, Easing, KeyMods, Overflow, OverlayPosition, PrototypeSettings, ScrollPosition, Transition, Trigger};
+use figcraft_doc::proto::{Action, Direction, Easing, KeyMods, Overflow, OverlayAnchor, OverlayPosition, PrototypeSettings, ScrollPosition, Transition, Trigger};
 use figcraft_doc::{Document, HConstraint, NodeId, NodeKind, VConstraint};
 use figcraft_geom::{Affine, Point, Rect as GRect};
 
@@ -71,6 +71,7 @@ struct OverlayState {
     close_on_outside: bool,
     background: Option<Color>,
     anchor: Option<GRect>,
+    anchor_to: OverlayAnchor,
     offset: Option<[f64; 2]>,
     /// NaN until the first tick after it opened.
     opened: f64,
@@ -456,7 +457,12 @@ impl Core {
             .iter()
             .filter_map(|o| {
                 let ob = disp.world_bounds(o.id)?;
-                let r = overlay_rect(o.position, screen, (ob.width(), ob.height()), o.anchor, o.offset.map(|[x, y]| (x, y)));
+                let size = (ob.width(), ob.height());
+                let anchored = o.anchor.and_then(|a| o.anchor_to.offset(o.position, [a.width(), a.height()], [size.0, size.1]));
+                let r = match anchored {
+                    Some(offset) => overlay_rect(OverlayPosition::Manual, screen, size, o.anchor, Some((offset[0], offset[1]))),
+                    None => overlay_rect(o.position, screen, size, o.anchor, o.offset.map(|[x, y]| (x, y))),
+                };
                 Some((o.id, Place { page_min: (ob.x0, ob.y0), origin: (r.x0, r.y0) }, r))
             })
             .collect();
@@ -610,7 +616,7 @@ impl Core {
                 self.rev += 1;
                 true
             }
-            Action::OpenOverlay { dest, position, close_on_outside, background, offset } => {
+            Action::OpenOverlay { dest, position, close_on_outside, background, offset, anchor } => {
                 if !doc.contains(*dest) {
                     return false;
                 }
@@ -623,6 +629,7 @@ impl Core {
                     close_on_outside: *close_on_outside,
                     background: *background,
                     anchor: rect,
+                    anchor_to: *anchor,
                     offset: *offset,
                     opened: f64::NAN,
                 });
@@ -647,6 +654,7 @@ impl Core {
                         close_on_outside: true,
                         background: None,
                         anchor: rect,
+                        anchor_to: OverlayAnchor::Screen,
                         offset: None,
                         opened: f64::NAN,
                     }),
