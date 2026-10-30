@@ -43,6 +43,8 @@ mod recovery_tests;
 #[cfg(test)]
 mod services_tests;
 #[cfg(test)]
+mod settings_dir_tests;
+#[cfg(test)]
 mod startup_tests;
 
 use std::sync::{Arc, Mutex};
@@ -234,7 +236,7 @@ fn main() -> eframe::Result {
     }
     let queue: Arc<Mutex<Vec<ControlRequest>>> = Arc::new(Mutex::new(Vec::new()));
     if let Some(p) = port {
-        control_server::start(p, queue.clone(), ctx_slot.clone());
+        control_server::start(p, graphics::port_wait(), queue.clone(), ctx_slot.clone(), fig.session.events.clone());
     }
     let icon = services::window_icon();
     // The app id is the Wayland app_id and the X11 window class on Linux: the desktop entry's name
@@ -258,7 +260,9 @@ fn main() -> eframe::Result {
         viewport = viewport.with_icon(icon);
     }
     let mut options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Wgpu, ..Default::default() };
-    graphics::configure(&mut options.wgpu_options);
+    let graphics = graphics::Plan::configure(&mut options.wgpu_options);
+    // Counts the frames drawn, which tells a window that failed starting up from one that ran.
+    let window = ctx_slot.clone();
     figcraft_ui_egui::windows::install(fig);
     // Registered before the event loop starts, so it catches the Finder event that launched the app
     // as well as later ones. Lives until the event loop returns; the app creator only borrows it.
@@ -269,8 +273,20 @@ fn main() -> eframe::Result {
     let result = eframe::run_native(
         "FigCraft",
         options,
-        Box::new(move |cc| {
+        Box::new(|cc| {
+            if let Some(state) = &cc.wgpu_render_state {
+                graphics.opened(&state.adapter.get_info());
+            }
             with_app(|fig| fig.services.set_egui_context(&cc.egui_ctx));
+            // winit's own Quit (⌘Q) ends the process through `terminate:` without ever asking the
+            // app, so unsaved changes are lost with no warning (issue #857). This menu's Quit
+            // sends the root window a close request instead, and the unsaved-changes question
+            // asks just as it does for the close button. Failure keeps winit's menu: the app
+            // runs, but ⌘Q ends it without asking.
+            #[cfg(target_os = "macos")]
+            if let Err(e) = craft_menu::mac::install_app_menu(&cc.egui_ctx, "FigCraft") {
+                log::warn!("app menu: kept winit's Quit, which ends the app without asking: {e}");
+            }
             Ok(Box::new(App {
                 queue,
                 ctx_slot,
@@ -281,11 +297,10 @@ fn main() -> eframe::Result {
             }))
         }),
     );
-    // Say why instead of quitting silently: release builds on Windows have no console.
-    if let Err(e) = &result {
-        startup::failed(e, port.is_some());
-    }
-    result
+    let frames = window.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().map_or(0, egui::Context::cumulative_frame_nr);
+    // Start again on other graphics, or say why instead of quitting silently: release builds on
+    // Windows have no console.
+    graphics.finish(result, frames, port.is_some())
 }
 
 /// With nothing to open, whether the window starts in a new file rather than on the home screen.

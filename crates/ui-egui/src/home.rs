@@ -15,6 +15,8 @@ use crate::i18n::{tr, tr_noop};
 use crate::icons::{self, Icon};
 use crate::theme::{ACCENT, Tokens, regular, semibold};
 use crate::widgets;
+pub mod home_recents;
+pub mod online;
 
 /// The section the home screen shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -341,16 +343,11 @@ fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     if open {
         app.open_dialog();
     }
-    // Join a file someone shared: the join field, and what the join is doing.
+    // Join a file someone shared (the Join dialog shows what the join is doing).
     subheading(ui, t, tr("Join with a code"));
     ui.scope(|ui| {
         ui.set_max_width(540.0);
-        if let Some(session) = crate::live::join_row(app, ui, 260.0) {
-            app.ui.live.home_join = Some(session);
-        }
-        if let Some(session) = app.ui.live.home_join {
-            crate::live::join_status(app, ui, t, session);
-        }
+        crate::live::join_row(app, ui, 260.0);
     });
     opened_join(app);
     if !app.session.prefs.getting_started_dismissed {

@@ -44,7 +44,7 @@ pub use figcraft_doc::{Document, NodeId};
 pub use history::{BatchKind, Notice};
 pub use message::{Accepted, Access, CatchUp, ClientMsg, EditingText, Hello, Peer, Presence, Processed, Resume, ServerMsg, Signal};
 pub use replica::{Applied, Mode, Replica};
-pub use server::{Journal, Outgoing, Server, SessionState, VIEW_ONLY};
+pub use server::{COMMENT_ONLY, Journal, Outgoing, Server, SessionState, VIEW_ONLY};
 
 /// Compare secrets (tokens, keys, their hashes) without stopping at the first difference.
 pub fn same_secret(a: &str, b: &str) -> bool {
@@ -88,7 +88,8 @@ pub struct Limits {
     pub max_log_batches: usize,
     /// Most changes in those batches together.
     pub max_log_changes: usize,
-    /// About how many bytes those batches may hold together ([`server::weight`]).
+    /// About how many bytes those batches may hold together ([`server::weight`]). 64 MiB by
+    /// default, so a long busy session (on a desktop host too) keeps a bounded log.
     pub max_log_bytes: usize,
 }
 
@@ -102,7 +103,7 @@ impl Default for Limits {
             max_name: 64,
             max_log_batches: 10_000,
             max_log_changes: 1_000_000,
-            max_log_bytes: usize::MAX,
+            max_log_bytes: 64 << 20,
         }
     }
 }
@@ -130,11 +131,15 @@ mod client_tests;
 #[cfg(test)]
 mod codec_tests;
 #[cfg(test)]
+mod comment_access_tests;
+#[cfg(test)]
 mod diff_tests;
 #[cfg(test)]
 mod entry_ids_tests;
 #[cfg(test)]
 mod frac_tests;
+#[cfg(test)]
+mod image_tests;
 #[cfg(test)]
 mod journal_tests;
 #[cfg(test)]
@@ -145,6 +150,8 @@ mod merge_tests;
 mod owned_tests;
 #[cfg(test)]
 mod reconnect_tests;
+#[cfg(test)]
+mod rename_tests;
 #[cfg(test)]
 mod server_tests;
 #[cfg(test)]
