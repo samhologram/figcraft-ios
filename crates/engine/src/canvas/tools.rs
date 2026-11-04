@@ -336,6 +336,9 @@ pub struct Overlay {
     pub rubber_handle: Option<[f64; 2]>,
     /// Frame/section the pointer is drawing or dropping into (highlighted).
     pub drop_target: Option<NodeId>,
+    /// Boards: the object a stamp would stick to, under the stamp tool's pointer or a stamp being
+    /// dragged (highlighted).
+    pub stamp_target: Option<NodeId>,
     /// Connector tool: the attach points (side middles, page x, y) of the object under the pointer,
     /// and whether the connector end is at each.
     pub attach: Vec<([f64; 2], bool)>,
@@ -497,6 +500,12 @@ pub(crate) enum Gesture {
         from: bool,
         start: Point,
     },
+    /// Dragging the selected connector `id`'s path handle for `portion` (pressed at `start`).
+    Reshape {
+        id: NodeId,
+        portion: usize,
+        start: Point,
+    },
     /// The eraser: the strokes it took so far.
     Erase {
         gone: Vec<NodeId>,
@@ -557,6 +566,9 @@ pub struct ToolState {
     pub dev_mode: bool,
     /// Pen snap targets, kept while hovering (see `vectoredit::point_snap`).
     pub(crate) pen_targets: Option<crate::vectoredit::point_snap::PenTargets>,
+    /// Vector edit mode's pen: where the last press that started something new (no path being
+    /// drawn) was, and the undo depth before it, so a double-click there takes that edit back.
+    pub(crate) pen_press: Option<(Point, usize)>,
     /// The Scale tool's anchor: column and row (0 start, 1 middle, 2 end) of the point of the
     /// selection box that stays put (`tool.scaleAnchor`).
     pub scale_anchor: (u8, u8),
@@ -575,6 +587,8 @@ pub struct ToolState {
     pub pick_only: bool,
     /// The colour the eyedropper sampled for a colour picker, until the picker takes it.
     pub picked: Option<figcraft_color::Color>,
+    /// The widget layers whose hover styles show while the pointer is over them (a live preview).
+    pub(crate) widget_hover: Vec<NodeId>,
 }
 
 impl ToolState {

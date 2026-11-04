@@ -127,7 +127,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "edit.pasteDesignLayers",
             "Paste design layers",
-            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes",
+            "{html (the clipboard's HTML) | data (base64 of the clipboard's design data, at most 256 MB), parent?, x?, y?}  layers copied from another design app (a .fig canvas in the clipboard's HTML), read like a .fig file (best effort, with `warnings`), pasted as edit.paste pastes; `missingImages`: the names of pasted layers whose image the clipboard didn't carry (they show the missing-image placeholder)",
             true,
             paste_design_layers
         ),
@@ -305,9 +305,10 @@ pub fn specs() -> Vec<CommandSpec> {
             ok()
         }),
         spec!("node.set", "Set properties", super::props::KEYS, true, set),
-        spec!("node.get", "Get layer", "{id}", false, |s, p| {
+        spec!("node.get", "Get layer", "{id, fields?: [node keys], outline?: bool (not with fields)}", false, |s, p| {
             let i = req_id("node.get", p, "id")?;
-            Ok(crate::inspect::node_json(s.doc()?, i, 1))
+            let options = crate::inspect::InspectOptions::parse(p).map_err(|e| bad("node.get", e))?;
+            Ok(crate::inspect::node_json_with_options(s.doc()?, i, 1, &options))
         }),
         spec!(
             "node.find",
@@ -543,6 +544,15 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = req_targets("edit.delete", s, p)?;
     let doc = s.doc_mut()?;
     let ids = roots(doc, &ids);
+    // A layer inside an instance can't be removed: Delete hides it instead, an override ("Figma
+    // will only toggle the layer's visibility instead of removing it", Guide to auto layout).
+    let (hidden, ids): (Vec<_>, Vec<_>) = ids.into_iter().partition(|i| crate::assets::components::inside_instance(doc, *i));
+    for i in &hidden {
+        doc.get_mut(*i)?.visible = false;
+    }
+    if ids.is_empty() {
+        return Ok(json!({"deleted": [], "hidden": hidden}));
+    }
     let mut parents = Vec::new();
     for i in &ids {
         if doc.node(*i).is_some_and(Node::is_page) {
@@ -555,7 +565,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Select the parent frame like Figma? Figma clears the selection.
     s.set_selection(vec![]);
-    Ok(json!({"deleted": ids}))
+    Ok(json!({"deleted": ids, "hidden": hidden}))
 }
 
 /// Layers duplicated last (Duplicate or Alt-drag) and their copies, in the same order. While the
@@ -627,6 +637,7 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
         }
         out.push(nid);
     }
+    crate::library::count_inserted(doc, &out);
     // Board connectors copied with what they join join the copies.
     let map = crate::board::copy_map(doc, &ids, &out);
     crate::board::rejoin(doc, &crate::board::copied_items(doc, &map), &map, false);

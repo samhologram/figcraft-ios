@@ -150,8 +150,12 @@ impl TextCase {
                     } else {
                         out.push(ch);
                         // An apostrophe only continues a word right after a letter or digit.
-                        let opening_apostrophe = matches!(ch, '\'' | '\u{2019}') && !last.is_some_and(char::is_alphanumeric);
-                        start = !is_word_char(ch) || opening_apostrophe;
+                        let opening_apostrophe =
+                            matches!(ch, '\'' | '\u{2019}') && !last.is_some_and(|c| c.is_alphanumeric() || is_combining_mark(c));
+                        // A combining mark attaches to the char before it and never changes word state.
+                        if !is_combining_mark(ch) {
+                            start = !is_word_char(ch) || opening_apostrophe;
+                        }
                     }
                     last = Some(ch);
                 }
@@ -166,9 +170,23 @@ impl TextCase {
     }
 }
 
-/// Letters, digits and apostrophes continue a word (so "don't" stays "Don't").
+/// Letters, digits, combining marks and apostrophes continue a word (so "don't" stays "Don't"
+/// and decomposed accents stay inside their word).
 fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '\'' | '\u{2019}')
+    c.is_alphanumeric() || is_combining_mark(c) || matches!(c, '\'' | '\u{2019}')
+}
+
+/// Combining marks such as the U+0301 accent in decomposed text: non-alphanumeric chars that
+/// extend the grapheme of the char before them.
+fn is_combining_mark(c: char) -> bool {
+    use unicode_segmentation::UnicodeSegmentation;
+    if c.is_ascii() || c.is_alphanumeric() {
+        return false;
+    }
+    let mut buf = [0u8; 8];
+    buf[0] = b'a';
+    let end = 1 + c.encode_utf8(&mut buf[1..]).len();
+    std::str::from_utf8(&buf[..end]).is_ok_and(|s| s.graphemes(true).count() == 1)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -216,6 +234,22 @@ pub enum LeadingTrim {
     CapHeight,
 }
 
+/// Where lines break when text wraps to more than one line ("Wrap style controls where lines
+/// break when text wraps to more than one line", Explore text properties).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum WrapStyle {
+    /// "Figma fits as many words as possible on each line before wrapping to the next."
+    #[default]
+    Auto,
+    /// "Figma distributes text as evenly as possible across every line, so each line is close to
+    /// the same length."
+    Balance,
+    /// "Figma keeps each line full, but adjusts the last four lines to avoid an orphan -- a single
+    /// word stranded alone on the last line."
+    Pretty,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ListStyle {
@@ -233,7 +267,10 @@ pub const MAX_LIST_INDENT: u8 = 8;
 #[serde(default)]
 pub struct ParaList {
     pub list: ListStyle,
-    /// Nesting level (0 = outermost; plain paragraphs are always 0).
+    /// Nesting level (0 = outermost). A plain paragraph is 0, except one that left its list by
+    /// Backspace or Delete at its start ([`TextData::unlist_keeping_levels`]): it keeps the level
+    /// it had and starts where that level's item text does ("delete the counter, but keep the
+    /// same level of indentation").
     pub indent: u8,
     /// A numbered list that starts counting at this paragraph counts from `start_offset + 1`
     /// (items that go on counting ignore it; other paragraphs are always 0).
@@ -361,6 +398,13 @@ impl TextStyle {
 /// Weight from a style name ("Semi Bold Italic" → 600).
 pub fn style_weight(style: &str) -> u16 {
     let s = style.to_ascii_lowercase().replace([' ', '-'], "");
+    // A weight number ("600", "600 Italic"), as some apps name styles.
+    let digits: String = s.chars().take_while(char::is_ascii_digit).collect();
+    if let Ok(n) = digits.parse::<u16>()
+        && (1..=1000).contains(&n)
+    {
+        return n;
+    }
     let table: [(&str, u16); 10] = [
         ("thin", 100),
         ("extralight", 200),
@@ -438,6 +482,10 @@ pub struct TextData {
     /// as fit).
     #[serde(skip_serializing_if = "crate::node::is_default")]
     pub max_lines: u32,
+    /// Where lines break when the text wraps: greedily (Auto), as evenly as the words allow
+    /// (Balance), or full with no one word alone on the last line (Pretty).
+    #[serde(skip_serializing_if = "crate::node::is_default")]
+    pub wrap_style: WrapStyle,
     /// OpenType feature toggles (e.g. "liga": false).
     #[serde(skip_serializing_if = "crate::node::is_default")]
     pub features: std::collections::BTreeMap<String, bool>,
@@ -581,12 +629,14 @@ impl TextData {
     }
 
     /// Whether text that runs out of room ends in an ellipsis: a truncating box, or auto height
-    /// with a line limit (the box hugs up to `max_lines` lines).
+    /// or auto width with a line limit (the box hugs up to `max_lines` lines: "Max lines is
+    /// available only if truncate text is enabled, and: Text resizing is set to auto height or
+    /// auto width").
     pub fn truncates(&self) -> bool {
         match self.auto_resize {
             TextAutoResize::Truncate => true,
-            TextAutoResize::Height => self.max_lines > 0,
-            TextAutoResize::WidthAndHeight | TextAutoResize::None => false,
+            TextAutoResize::Height | TextAutoResize::WidthAndHeight => self.max_lines > 0,
+            TextAutoResize::None => false,
         }
     }
 
@@ -773,11 +823,22 @@ impl TextData {
     /// paragraphs stay at level 0, only numbered ones keep a start, levels stop at
     /// [`MAX_LIST_INDENT`]); one style for all with no nesting or start folds back into `list`.
     pub fn set_para_lists(&mut self, start: usize, end: usize, f: impl Fn(&mut ParaList)) {
+        self.set_para_lists_with(start, end, false, f);
+    }
+
+    /// Take the list items among the paragraphs chars `start..end` touch out of their list at the
+    /// level they had, as Backspace or Delete at an item's start does: "delete the counter, but
+    /// keep the same level of indentation" (Create bulleted and numbered lists).
+    pub fn unlist_keeping_levels(&mut self, start: usize, end: usize) {
+        self.set_para_lists_with(start, end, true, |pl| pl.list = ListStyle::None);
+    }
+
+    fn set_para_lists_with(&mut self, start: usize, end: usize, keep_levels: bool, f: impl Fn(&mut ParaList)) {
         let (a, b) = self.para_span(start, end);
         self.fill_paragraphs();
         for pl in self.paragraphs.get_mut(a..=b).unwrap_or(&mut []) {
             f(pl);
-            if pl.list == ListStyle::None {
+            if pl.list == ListStyle::None && !keep_levels {
                 pl.indent = 0;
             }
             if pl.list != ListStyle::Numbered {
@@ -968,5 +1029,13 @@ mod title_case_tests {
         assert_eq!(TextCase::Title.apply_between("hello", None, Some('\'')), "Hello");
         assert_eq!(TextCase::Title.apply_between("t", Some('n'), Some('\'')), "t");
         assert_eq!(TextCase::Title.apply_between("t", Some(' '), Some('\u{2019}')), "T");
+    }
+
+    #[test]
+    fn title_case_combining_marks_do_not_break_words() {
+        assert_eq!(TextCase::Title.apply("re\u{301}sume\u{301}"), "Re\u{301}sume\u{301}");
+        assert_eq!(TextCase::Title.apply("re\u{301}sume\u{301} bon"), "Re\u{301}sume\u{301} Bon");
+        assert_eq!(TextCase::Title.apply("a \u{301}b"), "A \u{301}B");
+        assert_eq!(TextCase::Title.apply("cafe\u{301}'s"), "Cafe\u{301}'s");
     }
 }

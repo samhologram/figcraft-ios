@@ -5,6 +5,15 @@
 //! below this crate knows about egui, so the frontend can be replaced.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+/// FigCraft as craft-update knows it, with its 128 px icon and accent colour: the update
+/// prompt shows both, and an AppImage's menu entry gets the icon.
+#[cfg(not(target_arch = "wasm32"))]
+pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
+    icon_png: Some(include_bytes!("../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.figcraft.png")),
+    accent: Some([0x02, 0xda, 0x96]),
+    ..craft_update::suite::FIGCRAFT
+};
+
 pub mod a11y;
 pub mod bidi;
 pub mod canvas;
@@ -28,6 +37,10 @@ pub mod widgets;
 pub mod windows;
 
 #[cfg(test)]
+mod board_connect_tests;
+#[cfg(test)]
+mod board_line_tests;
+#[cfg(test)]
 mod board_picker_tests;
 #[cfg(test)]
 mod board_ui_tests;
@@ -49,6 +62,8 @@ mod canvas_drag_tests;
 #[cfg(test)]
 mod canvas_fixes_tests;
 #[cfg(test)]
+mod canvas_hover_tests;
+#[cfg(test)]
 mod canvas_image_rect_tests;
 #[cfg(test)]
 mod clipboard_fence_tests;
@@ -60,6 +75,8 @@ mod colorpicker_selection_tests;
 mod comments_tests;
 #[cfg(test)]
 mod component_props_reorder_tests;
+#[cfg(test)]
+mod component_set_narrow_tests;
 #[cfg(test)]
 mod component_swap_default_tests;
 #[cfg(test)]
@@ -73,6 +90,8 @@ mod crop_image_tests;
 #[cfg(test)]
 mod cursors_tests;
 #[cfg(test)]
+mod dash_pattern_tests;
+#[cfg(test)]
 mod design_paste_tests;
 #[cfg(test)]
 mod dev_mode_tests;
@@ -82,6 +101,8 @@ mod devmode_tail_tests;
 mod display_name_tests;
 #[cfg(test)]
 mod duplicate_paint_tests;
+#[cfg(test)]
+mod export_name_tests;
 #[cfg(test)]
 mod export_preview_tests;
 #[cfg(test)]
@@ -109,6 +130,8 @@ mod ime_tests;
 #[cfg(test)]
 mod import_report_tests;
 #[cfg(test)]
+mod inspect_fields_tests;
+#[cfg(test)]
 mod layers_behaviour_tests;
 #[cfg(test)]
 mod layers_drag_tests;
@@ -118,6 +141,8 @@ mod layers_keyboard_tests;
 mod layers_keys_tests;
 #[cfg(test)]
 mod layers_rename_tests;
+#[cfg(test)]
+mod library_beacon_tests;
 #[cfg(test)]
 mod live_chat_tests;
 #[cfg(test)]
@@ -198,6 +223,8 @@ mod proto_responsive_tests;
 #[cfg(test)]
 mod resources_tests;
 #[cfg(test)]
+mod sampled_color_tests;
+#[cfg(test)]
 mod save_as_tests;
 #[cfg(test)]
 mod select_all_tests;
@@ -212,7 +239,11 @@ mod style_folder_rename_tests;
 #[cfg(test)]
 mod style_props_tests;
 #[cfg(test)]
+mod table_paste_tests;
+#[cfg(test)]
 mod text_enter_tests;
+#[cfg(test)]
+mod text_link_tests;
 #[cfg(test)]
 mod titlebar_tests;
 #[cfg(test)]
@@ -232,6 +263,10 @@ mod vector_panel_tests;
 #[cfg(test)]
 mod vector_tail_ui_tests;
 #[cfg(test)]
+mod vote_history_ui_tests;
+#[cfg(test)]
+mod vote_voters_tests;
+#[cfg(test)]
 mod web_clipboard_tests;
 #[cfg(test)]
 mod web_save_tests;
@@ -240,6 +275,7 @@ mod windows_qa_tests;
 #[cfg(test)]
 mod windows_tests;
 pub use canvas::board_bar;
+pub use canvas::board_connect;
 pub use canvas::board_facilitate;
 pub use canvas::comments;
 pub use canvas::cursors;
@@ -258,6 +294,7 @@ pub use dialogs::credits;
 pub use dialogs::import_report;
 pub use dialogs::missing_fonts;
 pub use dialogs::plugins_ui;
+pub use dialogs::sampled_color;
 pub use dialogs::updates_ui;
 pub use dialogs::variables_panel;
 pub use home::home_recents;
@@ -305,6 +342,7 @@ pub use control::{ControlReply, ControlRequest, RequestGate, RequestState};
 mod app;
 mod clock;
 mod open;
+mod selection_cache;
 mod services;
 mod state;
 
@@ -471,6 +509,8 @@ pub struct UiState {
     /// Files the user opened whose fonts are yet to be checked (by document uid).
     pub font_checks: Vec<u64>,
     pub missing_fonts: Option<missing_fonts::Shown>,
+    /// The eyedropper's Cmd/Ctrl+Shift pick, to make a colour style or variable of.
+    pub sampled_color: Option<sampled_color::SampledColor>,
     pub screenshot_requests: Vec<(u64, String)>,
     pub frame_ms: f64,
     pub render_ms: f64,
@@ -521,12 +561,6 @@ pub struct UiState {
     /// copy changes the engine clipboard without writing the OS clipboard; the generation then
     /// no longer matches, so the stale mirror is not mistaken for the user's own copy.
     pub last_copy_generation: u64,
-    /// Since the last V key release: whether its press arrived, and whether a paste event did
-    /// (`shortcuts::swallowed_paste`).
-    pub v_pressed: bool,
-    pub paste_event: bool,
-    /// The window got the focus back since the last V release.
-    pub refocused: bool,
     /// A save shortcut pressed while a panel field had the keyboard: the field lets go (which
     /// commits what was typed) and the command runs next frame for that document/window.
     pub after_field: Option<shortcuts::AfterFieldSave>,
@@ -638,6 +672,7 @@ impl Default for UiState {
             import_report: None,
             font_checks: Vec::new(),
             missing_fonts: None,
+            sampled_color: None,
             screenshot_requests: Vec::new(),
             frame_ms: 0.0,
             render_ms: 0.0,
@@ -665,9 +700,6 @@ impl Default for UiState {
 
             last_copy: None,
             last_copy_generation: 0,
-            v_pressed: false,
-            paste_event: false,
-            refocused: false,
             after_field: None,
             held: egui::Modifiers::NONE,
             next_autosave: 0.0,

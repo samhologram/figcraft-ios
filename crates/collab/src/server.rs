@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use figcraft_doc::{Document, NodeId};
 use serde::{Deserialize, Serialize};
 
-use crate::change::{Change, Entry, Prop, Target};
+use crate::change::{Change, Entry, Family, Prop, Target};
 use crate::message::{
     Accepted, Access, CatchUp, ClientMsg, Hello, PROTOCOL, Peer, Presence, Processed, Resume, ServerMsg, Signal, reads_comments, reads_signals,
 };
@@ -64,7 +64,7 @@ pub struct Server {
     presence: BTreeMap<u32, Presence>,
     acked: BTreeMap<u32, u64>,
     /// Deleted node ids: only these may be created again (by undo); new ids must come from the
-    /// creating client's id space.
+    /// creating client's id space. At most [`MAX_DELETED`].
     deleted: BTreeSet<NodeId>,
     /// Removed document-level entries (styles, variables, collections, comments): these may be
     /// put back by anyone (undo); a new one must not have an id from another client's space.
@@ -97,6 +97,11 @@ pub struct Server {
 /// The most client ids a session remembers for reconnecting (the oldest disconnected ones go
 /// first; a forgotten client joins as new).
 const MAX_REMEMBERED: usize = 65_536;
+
+/// The most deleted node ids a session remembers for undo. Past it the lowest ids go first (the
+/// earliest clients' first layers): undoing the delete of one of those is then refused, unless the
+/// layer is in the undoing client's own id space, which it may always create.
+pub(crate) const MAX_DELETED: usize = 1 << 18;
 
 /// What a session server needs to carry on after a restart: the document, the sequence number,
 /// the client-id counter (so ids are never handed out twice), the clients that can reconnect,
@@ -178,6 +183,7 @@ impl Server {
         server.next_client = server.next_client.max(saved);
         server.issued = state.issued.into_iter().filter(|(id, _)| *id < server.next_client).collect();
         server.deleted = state.deleted;
+        server.forget_deleted();
         server.removed = state.removed;
         let contiguous = state.log.windows(2).all(|w| matches!(w, [a, b] if a.seq + 1 == b.seq));
         // History saved before the image checks may hold image entries they refuse. The snapshot
@@ -248,6 +254,13 @@ impl Server {
                 }
                 Ok(())
             }
+        }
+    }
+
+    /// Beyond [`MAX_DELETED`] deleted ids, forget the lowest.
+    fn forget_deleted(&mut self) {
+        while self.deleted.len() > MAX_DELETED {
+            self.deleted.pop_first();
         }
     }
 
@@ -400,10 +413,14 @@ impl Server {
             // client learned what happened to it from the catch-up.
             ClientMsg::Changes { batch_id, .. } if self.issued.get(&from).is_some_and(|p| batch_id <= p.last_batch) => Vec::new(),
             ClientMsg::Changes { base_seq, batch_id, changes } => {
+                let mut denied = true;
                 let result = match self.limited.get(&from) {
                     Some(Access::View) => Err(Error::Invalid(VIEW_ONLY.into())),
                     Some(Access::Comment) if !changes.iter().all(Change::is_comment) => Err(Error::Invalid(COMMENT_ONLY.into())),
-                    _ => self.accept(from, base_seq, &changes),
+                    _ => {
+                        denied = false;
+                        self.accept(from, base_seq, &changes)
+                    }
                 };
                 if let Some(p) = self.issued.get_mut(&from) {
                     p.note(batch_id, result.is_err());
@@ -417,7 +434,9 @@ impl Server {
                     }
                     Err(e) => {
                         self.note(Journal::Refused { client: from, batch_id });
-                        let fixes = self.fixes(&changes).unwrap_or_default();
+                        // A refusal for lack of permission costs no repair: the client's confirmed copy
+                        // already is the server's state, so the fixes would only repeat it.
+                        let fixes = if denied { Vec::new() } else { self.fixes(&changes).unwrap_or_default() };
                         vec![Outgoing::To(from, ServerMsg::Reject { batch_id, reason: reason(&e), fixes })]
                     }
                 }
@@ -456,6 +475,7 @@ impl Server {
             | ClientMsg::Plugins(_)
             | ClientMsg::OpenHosting(_)
             | ClientMsg::Resolve(_)
+            | ClientMsg::ResolveTeam(_)
             | ClientMsg::Report { .. } => {
                 vec![Outgoing::To(from, ServerMsg::Refused { reason: "managing files and libraries needs a connection of its own".into() })]
             }
@@ -522,6 +542,7 @@ impl Server {
             }
         }
         self.deleted.extend(applied.deleted);
+        self.forget_deleted();
         for (entry, now) in entries {
             if now {
                 self.removed.remove(&entry);
@@ -542,6 +563,7 @@ impl Server {
     fn check_entries(&self, from: u32, changes: &[Change], after: &Document) -> Result<Vec<(Entry, bool)>, Error> {
         let before = self.state.document();
         let mut touched: BTreeSet<Entry> = BTreeSet::new();
+        let mut listed: BTreeMap<Family, (BTreeSet<Entry>, BTreeSet<Entry>)> = BTreeMap::new();
         for c in changes {
             match c {
                 Change::Put { entry, .. } | Change::Remove { entry } if entry.id_space().is_some() => {
@@ -550,8 +572,10 @@ impl Server {
                 // A whole list replaced (the fallback for lists whose ids aren't unique).
                 Change::SetDoc { prop, .. } => {
                     if let Some(Ok(family)) = prop.list() {
-                        touched.extend(docprops::entries(before, family));
-                        touched.extend(docprops::entries(after, family));
+                        let (b, a) = (docprops::entries(before, family), docprops::entries(after, family));
+                        touched.extend(b.iter().chain(&a).cloned());
+                        // Looked up in sets below: a linear search per entry would be quadratic.
+                        listed.entry(family).or_insert_with(|| (b.into_iter().collect(), a.into_iter().collect()));
                     }
                 }
                 _ => {}
@@ -559,7 +583,10 @@ impl Server {
         }
         let mut out = Vec::new();
         for entry in touched {
-            let (was, now) = (docprops::has(before, &entry), docprops::has(after, &entry));
+            let (was, now) = match entry.family().and_then(|f| listed.get(&f)) {
+                Some((b, a)) => (b.contains(&entry), a.contains(&entry)),
+                None => (docprops::has(before, &entry), docprops::has(after, &entry)),
+            };
             if was == now {
                 continue;
             }

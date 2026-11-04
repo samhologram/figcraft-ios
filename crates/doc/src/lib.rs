@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod board;
+mod board_route;
 pub mod colors;
 pub mod comments;
 pub mod facilitation;
@@ -26,6 +27,7 @@ pub mod vector_faces;
 pub mod vector_regions;
 
 pub use board::*;
+pub use board_route::{RouteEnd, attached_sides, path_handles, reshaped, route_along, route_points};
 pub use colors::*;
 pub use comments::*;
 pub use facilitation::*;
@@ -243,6 +245,9 @@ pub struct Document {
     /// The vote's ballots, by voter.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub votes: Ballots,
+    /// Ended votes' results kept in the file, oldest first (at most [`VOTE_HISTORY_MAX`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vote_history: Vec<VoteRecord>,
 }
 
 impl Default for Document {
@@ -285,6 +290,7 @@ impl Document {
             timer: None,
             vote: None,
             votes: BTreeMap::new(),
+            vote_history: Vec::new(),
         }
     }
 
@@ -568,6 +574,19 @@ impl Document {
         Ok(())
     }
 
+    /// Remove every child of `id` with its subtree, in one pass over `id`'s child list (removing
+    /// them one by one would search that list once per child).
+    pub fn remove_children(&mut self, id: NodeId) -> DocResult<()> {
+        let kids = std::mem::take(&mut self.get_mut(id)?.children);
+        for c in kids {
+            for d in self.subtree(c) {
+                self.nodes.remove(&d);
+                self.dirty.touch(d);
+            }
+        }
+        Ok(())
+    }
+
     /// Whether sections may go in `parent`: a page or another section (never a frame or a group).
     pub fn takes_sections(&self, parent: NodeId) -> bool {
         self.node(parent).is_some_and(|p| p.is_page() || matches!(p.kind, NodeKind::Section { .. }))
@@ -738,7 +757,8 @@ impl Document {
 
     /// Bounds of everything painted by a node, effects and strokes included (page coordinates):
     /// a clipping frame's own area, else that and what its visible children show (masked
-    /// children only within their mask). A group is what its children show, grown by its effects.
+    /// children only within their mask). A group, or an unclipped frame past its box, is what its
+    /// children show grown by its effects, which apply to all of it.
     pub fn world_render_bounds(&self, id: NodeId) -> Option<Rect> {
         self.render_bounds_at(id, 0)
     }
@@ -751,7 +771,8 @@ impl Document {
         }
         Some(match (self.children_render_bounds(n, depth + 1), &n.kind) {
             (Some(kids), NodeKind::Group) => n.grow_by_effects(kids),
-            (Some(kids), _) => own.union(kids),
+            // An unclipped frame's effects apply to its children too, past its box included.
+            (Some(kids), _) => own.union(n.grow_by_effects(kids)),
             (None, _) => own,
         })
     }
@@ -1077,6 +1098,9 @@ impl Document {
         // lookups: a wide parent or a long page list doesn't make validation quadratic.
         let edges: std::collections::BTreeSet<(NodeId, NodeId)> = self.nodes.iter().flat_map(|(p, n)| n.children.iter().map(|c| (*p, *c))).collect();
         let page_ids: std::collections::BTreeSet<NodeId> = self.pages.iter().copied().collect();
+        if page_ids.len() != self.pages.len() {
+            note(&mut issues, || "a page is listed twice".to_string());
+        }
         for (id, n) in self.nodes.iter() {
             if n.id != *id {
                 note(&mut issues, || format!("node key {id} has id {}", n.id));
@@ -1170,9 +1194,10 @@ impl Document {
         if store != self.libraries.store {
             Arc::make_mut(&mut self.libraries).store = store;
         }
-        self.pages.retain(|p| self.nodes.get(p).is_some_and(|n| n.is_page()) && Some(*p) != store);
+        // A page listed twice would be imported, exported and walked once per listing.
+        let mut listed = std::collections::BTreeSet::new();
+        self.pages.retain(|p| self.nodes.get(p).is_some_and(|n| n.is_page()) && Some(*p) != store && listed.insert(*p));
         // Unlisted pages join the list; a set keeps many pages from making this quadratic (#1078).
-        let mut listed: std::collections::BTreeSet<NodeId> = self.pages.iter().copied().collect();
         for (k, n) in self.nodes.iter() {
             if n.is_page() && Some(*k) != store && listed.insert(*k) {
                 self.pages.push(*k);
@@ -1277,6 +1302,8 @@ fn remap_action(a: &mut proto::Action, map: &BTreeMap<NodeId, NodeId>) {
 
 #[cfg(test)]
 mod blur_tests;
+#[cfg(test)]
+mod board_shape_tests;
 #[cfg(test)]
 mod boolean_hit_tests;
 #[cfg(test)]

@@ -1,5 +1,36 @@
 use super::{FigApp, Point, PointerKind, Pos2, Rect, Ui, json, pointer_event};
 
+/// What a hover was found in: the event (where, the modifiers, the zoom) and what decides what it
+/// hits (the file and page, their revision, the selection, the tool and modes). The same again finds
+/// the same, so it isn't sent again.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HoverKey {
+    event: figcraft_engine::tools::PointerEvent,
+    doc: Option<(u64, figcraft_engine::doc::NodeId, u64)>,
+    selection: Vec<figcraft_engine::doc::NodeId>,
+    tool: figcraft_engine::ToolId,
+    modes: [bool; 3],
+}
+
+impl HoverKey {
+    fn of(app: &FigApp, event: figcraft_engine::tools::PointerEvent) -> Self {
+        let ds = app.session.ds().ok();
+        HoverKey {
+            event,
+            doc: ds.map(|d| (d.uid, d.page, d.revision)),
+            selection: ds.map(|d| d.selection.clone()).unwrap_or_default(),
+            tool: app.session.tool.tool,
+            modes: [app.session.tool.dev_mode, ds.is_some_and(|d| d.vector_edit.is_some()), ds.is_some_and(|d| d.text_edit.is_some())],
+        }
+    }
+}
+
+/// The pointer left the canvas (or something over it took the pointer): nothing is hovered there.
+fn left(app: &mut FigApp) {
+    app.canvas.last_hover = None;
+    app.session.pointer_left();
+}
+
 /// The zoom tool while Z is held (Alt: zoom out): a click zooms a step about the pointer, a drag
 /// zooms to the dragged area. Takes the pointer from the other tools while it's active.
 fn zoom_tool(app: &mut FigApp, ui: &Ui, resp: &egui::Response, pos: Pos2, mods: egui::Modifiers, typing: bool) -> bool {
@@ -75,6 +106,8 @@ pub(crate) fn swap_wheel(wheel: egui::Vec2, zoom: f32, shift: bool, speed: f32) 
 fn import_dropped(app: &mut FigApp, ctx: &egui::Context, hover_pos: Option<egui::Pos2>) {
     let dropped = ctx.input(|i| i.raw.dropped_files.clone());
     let mut refused = false;
+    // The first image goes to the colour picker that shows an image; the rest to the canvas.
+    let mut well = crate::colorpicker::image_drop_target(app, ctx).map(|(_, params)| params);
     for f in dropped {
         let path = f.path().to_path_buf();
         if crate::is_document(&path) {
@@ -87,17 +120,23 @@ fn import_dropped(app: &mut FigApp, ctx: &egui::Context, hover_pos: Option<egui:
         }
         let pt = hover_pos.map(|h| app.to_page(h)).unwrap_or_default();
         let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped.png".into());
-        let (params, read) = if path.exists() {
-            (json!({"path": path.to_string_lossy(), "x": pt.x, "y": pt.y}), None)
+        let (command, mut params) = match well.take() {
+            Some(params) => ("image.replace", params),
+            None => ("file.import", json!({"name": name, "x": pt.x, "y": pt.y})),
+        };
+        let read = if path.exists() {
+            params["path"] = json!(path.to_string_lossy());
+            params.as_object_mut().map(|o| o.remove("name"));
+            None
         } else {
-            (json!({"name": name, "x": pt.x, "y": pt.y}), Some(crate::dropped_bytes(&f, &name)))
+            Some(crate::dropped_bytes(&f, &name))
         };
         let Some(target) =
             app.session.ds().ok().map(|doc| crate::pending_open::ImportTarget { uid: doc.uid, page: doc.page, name: doc.doc.name.clone() })
         else {
             continue;
         };
-        app.ui.pending_opens.push(crate::pending_open::PendingOpen { label: name, params, command: "file.import", target: Some(target), read });
+        app.ui.pending_opens.push(crate::pending_open::PendingOpen { label: name, params, command, target: Some(target), read });
     }
 }
 
@@ -138,7 +177,7 @@ pub(super) fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> boo
         }
         // Leaving the canvas: nothing is hovered there any more.
         if !app.canvas.dragging && std::mem::take(&mut app.canvas.hovering) {
-            app.session.pointer_left();
+            left(app);
         }
         // A pan whose button was released off the canvas is over.
         if !ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle) || i.pointer.primary_down()) {
@@ -270,7 +309,7 @@ pub(super) fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> boo
     } else {
         // Something over the canvas took the pointer.
         if std::mem::take(&mut app.canvas.hovering) {
-            app.session.pointer_left();
+            left(app);
         }
         None
     };
@@ -302,6 +341,12 @@ pub(super) fn input(app: &mut FigApp, ui: &mut Ui, resp: &egui::Response) -> boo
 /// Pointer event `kind` at screen point `pos`, to the tools.
 fn send(app: &mut FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) {
     let ev = pointer_event(app, kind, pos, m);
+    // A hover where nothing changed since the last one finds what that one found (the state is
+    // taken after it ran: what it set, such as the hovered layer, is part of it).
+    let hover = kind == PointerKind::Hover;
+    if hover && app.canvas.last_hover.as_ref().is_some_and(|k| *k == HoverKey::of(app, ev.clone())) {
+        return;
+    }
     if kind == PointerKind::Up {
         app.canvas.pressure = None;
     }
@@ -309,6 +354,7 @@ fn send(app: &mut FigApp, kind: PointerKind, pos: Pos2, m: &egui::Modifiers) {
     if let Err(e) = app.session.pointer(&ev) {
         app.toast(e.to_string());
     }
+    app.canvas.last_hover = hover.then(|| HoverKey::of(app, ev));
     app.handle_ui_requests();
 }
 
