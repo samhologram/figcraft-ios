@@ -669,7 +669,7 @@ impl Core {
                 }
                 did
             }
-            Action::OpenUrl { url } => {
+            Action::OpenUrl { url, .. } => {
                 // Only web links open: the action can fire from a delay, with no click implied.
                 if figcraft_engine::doc_urls::openable(url) {
                     self.urls.push(url.clone());
