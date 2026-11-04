@@ -36,7 +36,7 @@ required-features = ["cli"]
 
 # The upstream workspace pins the hardened vendored krilla revision; path dependencies do not inherit it.
 [patch.crates-io]
-krilla = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "e11f9d9aebea5f6b8e74643c1ea1ed172ba5f545" }
 
 [profile.dev.package."*"]
 opt-level = 2
